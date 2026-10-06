@@ -1,0 +1,437 @@
+<header class="app-header">
+  <a class="brand" href="/" aria-label="Fluxus pradžia"
+    ><span class="brand-icon">f.</span
+    ><span>fluxus<span class="brand-caption">Žemės aukcionų žemėlapis</span></span></a
+  >
+  <div class="header-note">
+    <span class="live-dot"></span>Lietuva <span class="divider">/</span> Sklypai
+  </div>
+  <span class="prototype">Prototipas</span>
+</header>
+<main class="workspace">
+  <aside class="sidebar" [class.mobile-hidden]="mobileView() === 'map'">
+    <div class="sidebar-heading">
+      <p class="eyebrow">ATRASKITE SKLYPĄ</p>
+      <h1>Žemė jūsų planams.</h1>
+      <p>Vieši žemės aukcionai viename žemėlapyje.</p>
+    </div>
+    <form class="filters" (submit)="applyFilters($event)">
+      <div class="filter-pair">
+        <div>
+          <label for="offer-type">Žemės pasiūlymas</label>
+          <select
+            id="offer-type"
+            [value]="draft().offerType"
+            (change)="updateFilter('offerType', $any($event.target).value)"
+          >
+            <option value="sale">Parduodama</option>
+            <option value="rent">Nuomojama</option>
+            <option value="all">Visi pasiūlymai</option>
+            <option value="unknown">Tipas nenurodytas</option>
+          </select>
+        </div>
+        <div>
+          <label for="ownership-kind">Nuosavybės dalis</label>
+          <select
+            id="ownership-kind"
+            [value]="draft().ownershipKind"
+            [disabled]="draft().offerType === 'rent'"
+            (change)="updateFilter('ownershipKind', $any($event.target).value)"
+          >
+            <option value="all">Visos dalys</option>
+            <option value="full">Visa nuosavybė</option>
+            <option value="partial">Tik dalis</option>
+            <option value="unknown">Nenurodyta</option>
+          </select>
+        </div>
+      </div>
+      <label for="municipality">Savivaldybė</label>
+      <select
+        id="municipality"
+        [value]="draft().municipalityCode"
+        (change)="updateFilter('municipalityCode', $any($event.target).value)"
+      >
+        <option value="" [selected]="draft().municipalityCode === ''">Visa Lietuva</option>
+        @if (municipalities.hasValue()) {
+          @for (municipality of municipalities.value(); track municipality.code) {
+            <option
+              [value]="municipality.code"
+              [selected]="draft().municipalityCode === municipality.code"
+            >
+              {{ municipality.name }}
+            </option>
+          }
+        }
+      </select>
+      <fieldset>
+        <legend>Pradinė aukciono kaina, €</legend>
+        <div class="input-pair">
+          <input
+            aria-label="Kaina nuo"
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="Nuo"
+            [value]="draft().minPriceEur"
+            (input)="updateFilter('minPriceEur', $any($event.target).value)"
+          /><input
+            aria-label="Kaina iki"
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="Iki"
+            [value]="draft().maxPriceEur"
+            (input)="updateFilter('maxPriceEur', $any($event.target).value)"
+          />
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Siūlomas žemės plotas, ha</legend>
+        <div class="input-pair">
+          <input
+            aria-label="Plotas nuo"
+            type="number"
+            min="0"
+            step="0.0001"
+            placeholder="Nuo"
+            [value]="draft().minSoldAreaHa"
+            (input)="updateFilter('minSoldAreaHa', $any($event.target).value)"
+          /><input
+            aria-label="Plotas iki"
+            type="number"
+            min="0"
+            step="0.0001"
+            placeholder="Iki"
+            [value]="draft().maxSoldAreaHa"
+            (input)="updateFilter('maxSoldAreaHa', $any($event.target).value)"
+          />
+        </div>
+      </fieldset>
+      <label for="status">Būsena</label
+      ><select
+        id="status"
+        [value]="draft().status"
+        (change)="updateFilter('status', $any($event.target).value)"
+      >
+        <option value="announced,running">Visi aktyvūs</option>
+        <option value="running">Vyksta</option>
+        <option value="announced">Paskelbta</option>
+        <option value="announced,running,ended,cancelled,unknown">Visos būsenos</option>
+      </select>
+      @if (filterError(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+      <details
+        class="landscape-filters"
+        [open]="draft().minLandscapeScore !== '' || draft().landscapeStatus !== 'all'"
+      >
+        <summary>Kraštovaizdžio potencialas</summary>
+        <label for="landscape-min">Mažiausias balas, 0–100</label>
+        <input
+          id="landscape-min"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          placeholder="Bet koks"
+          [value]="draft().minLandscapeScore"
+          (input)="updateFilter('minLandscapeScore', $any($event.target).value)"
+        />
+        <label for="landscape-status">Vertinimo būsena</label>
+        <select
+          id="landscape-status"
+          [value]="draft().landscapeStatus"
+          (change)="updateFilter('landscapeStatus', $any($event.target).value)"
+        >
+          <option value="all">Visi sklypai</option>
+          <option value="ready">Su bendru balu</option>
+          <option value="not_analyzed">Dar nevertinti</option>
+          <option value="queued">Laukia vertinimo</option>
+          <option value="processing">Vertinami</option>
+          <option value="partial">Duomenys nepilni</option>
+          <option value="unavailable">Trūksta duomenų</option>
+          <option value="failed">Vertinimas nepavyko</option>
+        </select>
+        <p>Balai bus prieinami įkėlus patikrintus aplinkos duomenis.</p>
+      </details>
+      <div class="filter-actions">
+        <button class="primary" type="submit">Taikyti filtrus <span>→</span></button
+        ><button class="text-button" type="button" (click)="resetFilters()">Išvalyti</button>
+      </div>
+    </form>
+    <section class="results" aria-label="Aukcionų sąrašas">
+      @if (catalog.isLoading()) {
+        <div class="empty" role="status">Įkeliami aukcionai…</div>
+      } @else if (catalog.error(); as error) {
+        <div class="empty">
+          <p class="error" role="alert">{{ errorMessage(error) }}</p>
+          <button (click)="catalog.reload()">Bandyti dar kartą</button>
+        </div>
+      } @else if (catalog.hasValue()) {
+        <div class="results-heading">
+          <strong>{{ catalog.value().meta.auctions }} aukcionų</strong
+          ><span>{{ catalog.value().meta.items }} sklypų pasiūlymų</span>
+        </div>
+        <div class="sort-control">
+          <label for="sort">Rikiuoti</label>
+          <select
+            id="sort"
+            [value]="filters().sort"
+            (change)="changeSort($any($event.target).value)"
+          >
+            <option value="ending">Pagal aukciono pabaigą</option>
+            <option value="price_asc">Kaina: nuo mažiausios</option>
+            <option value="price_desc">Kaina: nuo didžiausios</option>
+            <option value="landscape_desc">Kraštovaizdis: nuo aukščiausio balo</option>
+            <option value="landscape_asc">Kraštovaizdis: nuo žemiausio balo</option>
+          </select>
+        </div>
+        @for (group of groups(); track group.id) {
+          <button
+            class="auction-card"
+            [class.active]="selectedCard()?.auctionId === group.id"
+            (click)="select(group.item.id)"
+            [attr.aria-pressed]="selectedCard()?.auctionId === group.id"
+          >
+            <div class="card-top">
+              <span class="status-pill">{{ status(group.item.status) }}</span
+              ><span class="auction-number">Nr. {{ group.item.number }}</span>
+            </div>
+            <h2>{{ group.item.municipalityName ?? 'Vieta tikslinama' }}</h2>
+            <p class="address">{{ group.item.address ?? 'Adresas nenurodytas' }}</p>
+            <div class="card-values">
+              <strong>{{ money(group.item.initialPriceEur) }}</strong
+              ><span>{{ area(group.item.soldAreaHa) }}</span>
+            </div>
+            <div class="offer-badges">
+              @for (type of group.offerTypes; track type) {
+                <span class="offer-pill" [class.rental]="type === 'rent'">{{
+                  offerType(type)
+                }}</span>
+              }
+              @for (kind of group.ownershipKinds; track kind) {
+                <span>{{ ownership(kind) }}</span>
+              }
+              @if (
+                group.items.length === 1 && group.item.offerType === 'sale' && group.item.share
+              ) {
+                <span>· {{ group.item.share }}</span>
+              }
+            </div>
+            @if (group.items.length === 1) {
+              <span class="landscape-badge" [class.scored]="group.item.landscape.score !== null">{{
+                landscapeLabel(group.item.landscape)
+              }}</span>
+            } @else {
+              <span class="landscape-badge">Kraštovaizdis vertinamas kiekvienam sklypui</span>
+            }
+            <div class="card-footer">
+              <span>Iki {{ date(group.item.endsAt) }}</span
+              ><span>{{ group.items.length > 1 ? group.items.length + ' pasiūlymai' : '↗' }}</span>
+            </div>
+            @if (group.item.containsNonLandAssets) {
+              <span class="small-note">Žemė ir kitas turtas</span>
+            }
+            @if (group.unresolved) {
+              <span class="small-note"
+                >Vieta nenustatyta · {{ resolution(group.item.resolutionStatus) }}</span
+              >
+            }
+          </button>
+        } @empty {
+          <div class="empty">
+            <strong>Sklypų nerasta</strong>
+            <p>Pakeiskite filtrus arba patikrinkite, ar importuoti duomenys.</p>
+          </div>
+        }
+      }
+    </section>
+  </aside>
+  <section
+    class="map-section"
+    [class.mobile-hidden]="mobileView() === 'list'"
+    aria-label="Sklypų žemėlapis"
+  >
+    @if (catalog.hasValue()) {
+      <app-auction-map
+        [features]="catalog.value()"
+        [selectedId]="selectedId()"
+        [boundary]="boundary()"
+        [visibility]="visibility()"
+        (selected)="select($event)"
+      />
+      <div class="map-summary">
+        <span class="summary-dot"></span
+        ><strong>{{ catalog.value().meta.mapped }}</strong> pasiūlymų žemėlapyje
+        @if (catalog.value().meta.unresolved) {
+          <span class="unresolved">· {{ catalog.value().meta.unresolved }} be vietos</span>
+        }
+      </div>
+      <div class="freshness">
+        @if (catalog.value().meta.fixtureMode) {
+          <strong>Pavyzdiniai duomenys</strong
+          ><span>Užfiksuotas šaltinio pavyzdys. Tai nėra aktualus aukcionų sąrašas.</span>
+        } @else {
+          <strong [class.stale]="stale()">{{
+            stale() ? 'Duomenys gali būti pasenę' : 'Paskutinis stebėjimas'
+          }}</strong
+          ><span
+            >{{ date(catalog.value().meta.observedAt) }}
+            @if (!catalog.value().meta.discoveryComplete) {
+              · dalinis katalogas
+            }
+          </span>
+        }
+      </div>
+      <div class="map-legend">
+        <span class="legend-dot"></span>Sklypo pasiūlymas<span class="legend-square"></span
+        >Pasirinkto sklypo ribos
+      </div>
+    } @else {
+      <div class="map-placeholder">
+        <div class="placeholder-grid"></div>
+        <span>{{ catalog.error() ? 'Žemėlapis laukia duomenų' : 'Ruošiame žemėlapį…' }}</span>
+      </div>
+    }
+    @if (selectedId()) {
+      <section class="detail-panel" #detailPanel tabindex="-1" aria-label="Pasirinktas aukcionas">
+        <button class="close" (click)="closeDetails()" aria-label="Uždaryti aukcioną">×</button>
+        @if (detail.isLoading()) {
+          <p role="status">Įkeliama aukciono informacija…</p>
+        } @else if (detail.error(); as error) {
+          <p class="error" role="alert">{{ errorMessage(error) }}</p>
+          <button (click)="detail.reload()">Bandyti dar kartą</button>
+        } @else if (detail.hasValue()) {
+          <p class="eyebrow">AUKCIONAS NR. {{ detail.value().number }}</p>
+          <h2>{{ selectedCard()?.municipalityName ?? 'Žemės sklypas' }}</h2>
+          <p class="detail-address">{{ selectedCard()?.address }}</p>
+          <p class="offer-description">
+            {{ offerType(selectedCard()?.offerType ?? 'unknown') }} ·
+            {{ ownership(selectedCard()?.ownershipKind ?? 'unknown') }}
+          </p>
+          @if (selectedCard()?.offerType === 'rent') {
+            <p class="bundle-note">
+              Nuomojamas sklypas; žemės nuosavybė neperleidžiama. Nuomos laikotarpį ir kainos
+              sąlygas tikrinkite oficialiame skelbime.
+            </p>
+          }
+          <div class="detail-price">{{ money(detail.value().initialPriceEur) }}</div>
+          <span class="price-label">Viso aukciono pradinė kaina</span>
+          @if (detail.value().containsNonLandAssets) {
+            <p class="bundle-note">
+              Aukcione siūloma žemė ir kitas turtas. Kaina apima visą turto komplektą.
+            </p>
+          }
+          <dl>
+            <div>
+              <dt>Visas sklypo plotas</dt>
+              <dd>{{ area(selectedCard()?.totalAreaHa ?? null) }}</dd>
+            </div>
+            <div>
+              <dt>
+                {{ selectedCard()?.offerType === 'rent' ? 'Nuomojama dalis' : 'Parduodama dalis' }}
+              </dt>
+              <dd>{{ selectedCard()?.share ?? 'Nenurodyta' }}</dd>
+            </div>
+            <div>
+              <dt>
+                {{
+                  selectedCard()?.offerType === 'rent' ? 'Nuomojamas plotas' : 'Parduodamas plotas'
+                }}
+              </dt>
+              <dd>
+                {{ area(selectedCard()?.soldAreaHa ?? null) }}
+                @if (selectedCard()?.soldAreaBasis === 'derived') {
+                  <small>apskaičiuotas</small>
+                }
+              </dd>
+            </div>
+            <div>
+              <dt>Paskutinis stebėtas pasiūlymas</dt>
+              <dd>
+                {{
+                  detail.value().lastBidEur === null
+                    ? 'Pasiūlymų nepastebėta'
+                    : money(detail.value().lastBidEur)
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>Aukciono pabaiga</dt>
+              <dd>{{ date(detail.value().endsAt) }}</dd>
+            </div>
+          </dl>
+          <div class="parcel-selector">
+            <span class="section-label">Šio aukciono žemės pasiūlymai</span>
+            @for (section of detail.value().items; track section.card.id) {
+              <button
+                [class.chosen]="section.card.id === selectedId()"
+                [attr.aria-pressed]="section.card.id === selectedId()"
+                (click)="select(section.card.id)"
+              >
+                <span>{{
+                  section.cadastralNumber ?? section.uniqueNumber ?? 'Numeris nenurodytas'
+                }}</span
+                ><small
+                  >{{ offerType(section.card.offerType) }} ·
+                  {{ section.card.share ?? 'Dalis nenurodyta' }} ·
+                  {{ area(section.card.soldAreaHa) }}</small
+                >
+              </button>
+            }
+          </div>
+          <p class="geometry-note">
+            {{ resolution(selectedCard()?.resolutionStatus ?? '') }}. Rodoma viso kadastro sklypo
+            riba; nuosavybės dalis neturi atskiros pažymėtos teritorijos.
+          </p>
+          @if (landscape.isLoading()) {
+            <p role="status">Įkeliamas kraštovaizdžio vertinimas…</p>
+          } @else if (landscape.error()) {
+            <p class="error" role="alert">Kraštovaizdžio duomenų įkelti nepavyko.</p>
+            <button (click)="landscape.reload()">Bandyti dar kartą</button>
+          } @else if (landscape.hasValue()) {
+            <app-landscape-details [detail]="landscape.value()" />
+            @if (landscape.value().visibility) {
+              <label class="visibility-toggle"
+                ><input
+                  type="checkbox"
+                  [checked]="showVisibility()"
+                  (change)="showVisibility.set($any($event.target).checked)"
+                />
+                Galimi vaizdai žemėlapyje</label
+              >
+              @if (showVisibility()) {
+                <p class="geometry-note">
+                  Žalia spalva – modeliuojami matomi paviršiai iš pažymėto tipinio taško, 1,7 m
+                  aukščio, iki 3 km.
+                </p>
+              }
+            }
+          }
+          @if (geometry.error()) {
+            <p class="error" role="alert">Ribų įkelti nepavyko.</p>
+          }
+          <a
+            class="source-link"
+            [href]="detail.value().sourceUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Peržiūrėti oficialų aukcioną <span>↗</span></a
+          >
+          <p class="detail-observed">
+            Stebėta {{ date(detail.value().observedAt) }} · Vilniaus laiku
+          </p>
+        } @else {
+          <p>Pasirinktas sklypas nepriklauso dabartiniams rezultatams.</p>
+        }
+      </section>
+    }
+  </section>
+  <nav class="mobile-switch" aria-label="Rodinio pasirinkimas">
+    <button [class.selected]="mobileView() === 'map'" (click)="mobileView.set('map')">
+      Žemėlapis</button
+    ><button [class.selected]="mobileView() === 'list'" (click)="mobileView.set('list')">
+      Sąrašas ir filtrai
+    </button>
+  </nav>
+</main>

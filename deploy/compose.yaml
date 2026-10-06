@@ -1,0 +1,58 @@
+name: fluxus
+services:
+  api:
+    profiles: [app]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Catalogue: Host=db;Port=5432;Database=fluxus;Username=fluxus;Password=${POSTGRES_PASSWORD:-local-development-only};SSL Mode=Disable;GSS Encryption Mode=Disable
+      Source__Mode: Fixture
+      Landscape__ArtifactRoot: /landscape-artifacts
+    volumes:
+      - landscape-artifacts:/landscape-artifacts:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+  landscape-worker:
+    profiles: [landscape]
+    build:
+      context: ..
+      dockerfile: deploy/Landscape.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Catalogue: Host=db;Port=5432;Database=fluxus;Username=fluxus;Password=${POSTGRES_PASSWORD:-local-development-only};SSL Mode=Disable;GSS Encryption Mode=Disable
+      Landscape__InputRoot: /inputs
+      Landscape__ArtifactRoot: /landscape-artifacts
+    volumes:
+      - ../.local/landscape-inputs:/inputs:ro
+      - landscape-artifacts:/landscape-artifacts
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    mem_limit: 4g
+    cpus: 2
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_DB: fluxus
+      POSTGRES_USER: fluxus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fluxus -d fluxus"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+volumes:
+  postgres:
+  landscape-artifacts:

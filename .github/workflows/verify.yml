@@ -1,0 +1,38 @@
+name: Verify prototype
+on:
+  push:
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_DB: fluxus
+          POSTGRES_USER: fluxus
+          POSTGRES_PASSWORD: local-development-only
+        ports: ["15432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fluxus -d fluxus"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet restore Fluxus.slnx --locked-mode
+      - run: dotnet test Fluxus.slnx --no-restore --verbosity minimal
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: src/Fluxus.Web/package-lock.json
+      - run: npm ci
+        working-directory: src/Fluxus.Web
+      - run: npm test -- --watch=false
+        working-directory: src/Fluxus.Web
+      - run: npm run build
+        working-directory: src/Fluxus.Web
+      - run: npm run format:check
+        working-directory: src/Fluxus.Web

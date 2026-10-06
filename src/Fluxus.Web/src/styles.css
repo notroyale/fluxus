@@ -1,0 +1,34 @@
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+body {
+  font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+  color: #294534;
+  background: #f8faf6;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button,
+select {
+  cursor: pointer;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #43876b;
+  outline-offset: 3px;
+}
+.maplibregl-ctrl-attrib {
+  font-size: 9px;
+}

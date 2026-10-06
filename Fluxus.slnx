@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Fluxus.Api/Fluxus.Api.csproj" />
+    <Project Path="src/Fluxus.Core/Fluxus.Core.csproj" />
+    <Project Path="src/Fluxus.Infrastructure/Fluxus.Infrastructure.csproj" />
+    <Project Path="src/Fluxus.Landscape.Worker/Fluxus.Landscape.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Fluxus.Tests/Fluxus.Tests.csproj" />
+  </Folder>
+</Solution>
