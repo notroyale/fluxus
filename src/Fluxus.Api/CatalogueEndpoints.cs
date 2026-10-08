@@ -55,7 +55,7 @@ public sealed record ItemCard(Guid Id, Guid AuctionId, string Number, string Sta
     string? MunicipalityCode, string? MunicipalityName, decimal? InitialPriceEur, decimal? LastBidEur,
     DateTimeOffset? EndsAt, decimal? TotalAreaHa, decimal? SoldAreaHa, string SoldAreaBasis,
     string? Share, bool ContainsNonLandAssets, string ResolutionStatus, string OfferType, string OwnershipKind,
-    LandscapeSummary Landscape);
+    LandscapeSummary Landscape, DateTimeOffset? FirstSeenAt);
 
 public static class CatalogueEndpoints
 {
@@ -196,5 +196,5 @@ public static class CatalogueEndpoints
         item.Auction.Status, item.Address, item.Parcel?.MunicipalityCode, item.Parcel?.MunicipalityName,
         item.Auction.InitialPriceEur, item.Auction.LastBidEur, item.Auction.EndsAt, item.TotalAreaHa, item.SoldAreaHa,
         item.SoldAreaBasis, item.Share, item.Auction.ContainsNonLandAssets, item.ResolutionStatus, item.OfferType, item.OwnershipKind,
-        LandscapeEndpoints.Summary(item));
+        LandscapeEndpoints.Summary(item), item.FirstSeenAt);
 }

@@ -6,6 +6,7 @@
   <div class="header-note">
     <span class="live-dot"></span>Lietuva <span class="divider">/</span> Sklypai
   </div>
+  <app-catalog-refresh (refreshed)="reloadCatalogue()" />
   <span class="prototype">Prototipas</span>
 </header>
 <main class="workspace">
@@ -284,7 +285,10 @@
         }
       </div>
       <div class="map-legend">
-        <span class="legend-dot"></span>Sklypo pasiūlymas<span class="legend-square"></span
+        <span class="legend-dot"></span>Kiti pasiūlymai
+        <span class="legend-dot" style="background: #77c79d"></span>Pridėta per 5 d.<span
+          class="legend-square"
+        ></span
         >Pasirinkto sklypo ribos
       </div>
     } @else {

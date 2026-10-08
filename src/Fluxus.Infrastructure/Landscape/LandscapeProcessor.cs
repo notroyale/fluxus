@@ -9,7 +9,7 @@ using NtsGeometry = NetTopologySuite.Geometries.Geometry;
 namespace Fluxus.Infrastructure.Landscape;
 
 public sealed record LandscapeViewpoint(double X, double Y, double EyeHeightM, double VisibleAreaKm2,
-    double DistantDirectionFraction, double NaturalDiversity, double VisibleWaterFraction);
+    double DistantDirectionFraction, double? NaturalDiversity, double? VisibleWaterFraction);
 
 public sealed class LandscapeProcessor(GdalRunner gdal, string inputRoot, string artifactRoot)
 {
@@ -40,8 +40,8 @@ public sealed class LandscapeProcessor(GdalRunner gdal, string inputRoot, string
                 ground.MinY != surface.MinY || ground.Width != cover.Width || ground.MinX != cover.MinX || ground.MinY != cover.MinY || ground.Height != cover.Height)
                 throw new LandscapeInputException("grids_not_aligned");
             var observer = polygon.PointOnSurface.Coordinate;
-            var buildings = await VectorAsync(b.Buildings.Path, ct);
-            var roads = await VectorAsync(b.MajorRoads.Path, ct);
+            var buildings = await VectorAsync(b.Buildings.Path, true, ct);
+            var roads = await VectorAsync(b.MajorRoads.Path, false, ct);
             var observerPoint = polygon.Factory.CreatePoint(observer);
             var nearestBuilding = buildings.Count == 0 ? 1000 : Math.Min(1000, buildings.Min(g => g.Distance(observerPoint)));
             var buildingCount = buildings.Count(g => g.Distance(observerPoint) <= 1000);
@@ -74,12 +74,17 @@ public sealed class LandscapeProcessor(GdalRunner gdal, string inputRoot, string
             if (!sufficient) limitations.Add("insufficient_complete_viewpoints");
             if (ordered.Length < 3 && ordered.Length > 0) limitations.Add("sparse_viewpoint_sampling");
             if (b.Substituted) limitations.Add("source_substitution");
-            double? Median(Func<LandscapeViewpoint, double> select) => sufficient ? MedianValue(ordered.Select(v => select(v.Metrics))) : null;
+            double? Median(Func<LandscapeViewpoint, double?> select)
+            {
+                var values = ordered.Select(v => select(v.Metrics)).ToArray();
+                return sufficient && values.All(v => v.HasValue) ? MedianValue(values.Select(v => v!.Value)) : null;
+            }
             var metrics = new LandscapeMetrics(Median(v => v.VisibleAreaKm2), Median(v => v.DistantDirectionFraction),
                 Median(v => v.NaturalDiversity), terrain.Relief, terrain.Tpi, nature.Fraction,
                 nature.Forest, nature.Water, Median(v => v.VisibleWaterFraction), nearestBuilding, buildingCount,
                 nearestRoad, gentle.TotalHa, gentle.LargestHa, ordered.Length, ordered.Length > 0 ? ordered[^1].Metrics.VisibleAreaKm2 : null);
             if (nature.Fraction is null) limitations.Add("land_cover_incomplete");
+            if (sufficient && metrics.VisibleWaterFraction is null) limitations.Add("visible_cover_incomplete");
             if (terrain.Relief is null) limitations.Add("ground_context_incomplete");
             if (gentle.TotalHa is null) limitations.Add("parcel_ground_incomplete");
             var scores = LandscapeScore.Calculate(metrics);
@@ -92,7 +97,7 @@ public sealed class LandscapeProcessor(GdalRunner gdal, string inputRoot, string
                 Quality = scores.Overall.HasValue ? LandscapeScore.Quality(b.SurveyYearFrom, ordered.Length, b.Substituted, DateTime.UtcNow.Year) : "unknown"
             };
             // Publish a ground-referenced, obstruction-aware estimate from the point nearest the median view.
-            if (scores.Overall.HasValue)
+            if (sufficient)
                 await PublishImageAsync(analysis, ordered.OrderBy(v => Math.Abs(v.Metrics.VisibleAreaKm2 - metrics.VisibleAreaKm2!.Value)).First().Raster, staging, ct);
             return analysis;
         }
@@ -146,7 +151,7 @@ public sealed class LandscapeProcessor(GdalRunner gdal, string inputRoot, string
         return grid;
     }
 
-    private static async Task<List<NtsGeometry>> VectorAsync(string path, CancellationToken ct)
+    private static async Task<List<NtsGeometry>> VectorAsync(string path, bool polygons, CancellationToken ct)
     {
         if (new FileInfo(path).Length > 64 * 1024 * 1024) throw new LandscapeInputException("context_budget_exceeded");
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(path, ct));
@@ -156,6 +161,7 @@ public sealed class LandscapeProcessor(GdalRunner gdal, string inputRoot, string
         var geometries = root.GetProperty("features").EnumerateArray()
             .Select(f => reader.Read<NtsGeometry>(f.GetProperty("geometry").GetRawText())).ToList();
         if (geometries.Count > 200_000 || geometries.Any(g => g is null || g.IsEmpty || !g.IsValid ||
+            (polygons ? g is not (Polygon or MultiPolygon) : g is not (LineString or MultiLineString)) ||
             g.Coordinates.Any(c => !double.IsFinite(c.X) || !double.IsFinite(c.Y) || c.X is < 200000 or > 800000 || c.Y is < 5900000 or > 6300000)))
             throw new LandscapeInputException("invalid_context_vectors");
         return geometries;
@@ -178,14 +184,13 @@ public sealed class LandscapeProcessor(GdalRunner gdal, string inputRoot, string
             var category = (int)cover.Values[index]; classes[category]++;
             if (category == 3) water++;
         }
-        // A missing cover cell cannot be counted as human cover or a verified zero water fraction.
-        if (unknown) throw new LandscapeInputException("visible_cover_incomplete");
+        // Missing cover withholds cover-dependent measurements while preserving terrain visibility.
         var natural = classes.Skip(1).Sum(); double diversity = 0;
         if (natural > 0)
             foreach (var n in classes.Skip(1).Where(n => n > 0))
             { var fraction = n / (double)natural; diversity -= fraction * Math.Log(fraction) / Math.Log(3); }
         return new(point.X, point.Y, 1.7, count * visible.CellSize * visible.CellSize / 1_000_000,
-            sectors.Count(v => v) / 36.0, diversity, count > 0 ? water / (double)count : 0);
+            sectors.Count(v => v) / 36.0, unknown ? null : diversity, unknown ? null : count > 0 ? water / (double)count : 0);
     }
 
     private static (double? Fraction, double? Forest, double? Water) Nature(AsciiGrid cover, Coordinate center)

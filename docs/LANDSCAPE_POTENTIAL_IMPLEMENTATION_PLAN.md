@@ -1,6 +1,6 @@
 # Landscape potential: implementation plan
 
-Prepared: 6 October 2026. Status: proposed feature; no scoring or terrain-processing code has been implemented.
+Prepared: 6 October 2026; updated 8 October. Status: durable worker, raw LAS/LAZ preparation, bounded GRPK context acquisition, score/API/UI slice and initial storage controls implemented. The first real LiDAR area is downloaded (56 tiles, 3.04 GB); height-reference/source validation and the 20-parcel calibration pilot remain pending. See the [validation record](LANDSCAPE_SOURCE_VALIDATION.md) and [runbook](LANDSCAPE_RUNBOOK.md) for implemented scope and deviations from this target plan.
 
 ## 1. Outcome
 

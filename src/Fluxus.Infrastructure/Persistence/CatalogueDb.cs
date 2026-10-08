@@ -27,6 +27,7 @@ public sealed class AuctionItemEntity
     public Guid AuctionId { get; set; }
     public AuctionEntity Auction { get; set; } = null!;
     public string SourceKey { get; set; } = "";
+    public DateTimeOffset? FirstSeenAt { get; set; }
     public Guid? ParcelId { get; set; }
     public ParcelEntity? Parcel { get; set; }
     public string? UniqueNumber { get; set; }

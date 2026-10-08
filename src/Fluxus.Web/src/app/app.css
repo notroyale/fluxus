@@ -526,7 +526,7 @@ dd small {
     display: none;
   }
   .prototype {
-    margin-left: auto;
+    display: none;
   }
   .workspace {
     height: calc(100dvh - 66px);

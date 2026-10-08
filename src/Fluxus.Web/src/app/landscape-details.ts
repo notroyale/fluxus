@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
 import { LandscapeDetail, landscapeLabel } from './landscape-api';
 
 @Component({
@@ -8,6 +8,57 @@ import { LandscapeDetail, landscapeLabel } from './landscape-api';
     <section class="landscape" aria-label="Kraštovaizdžio potencialas">
       <p class="eyebrow">KRAŠTOVAIZDŽIO POTENCIALAS</p>
       <h3>{{ label() }}</h3>
+      @if (detail().preliminaryReport; as report) {
+        <div class="preliminary-report">
+          <p>
+            Turimų duomenų apžvalga su reljefo vaizdu ir aprėpties patikromis. Bendras
+            kraštovaizdžio balas dar neskaičiuojamas.
+          </p>
+          <a class="report-link" [href]="report.url" target="_blank" rel="noopener"
+            >Atverti preliminarią ataskaitą (PDF) ↗</a
+          >
+          <p class="provenance">
+            Parengta {{ reportDate(report.createdAt) }} · skelbimas fiksuotas
+            {{ reportDate(report.offerObservedAt) }}. Ataskaita nepatvirtina dabartinės aukciono
+            būsenos.
+          </p>
+        </div>
+      }
+      @if (detail().terrainPreview; as preview) {
+        <figure class="terrain-preview">
+          <h4>3D reljefo peržiūra</h4>
+          @if (failedImage() !== preview.url) {
+            <a
+              [href]="preview.url"
+              target="_blank"
+              rel="noopener"
+              aria-label="Atverti didelį 3D reljefo vaizdą"
+            >
+              <img
+                [src]="preview.url"
+                [width]="preview.width"
+                [height]="preview.height"
+                loading="lazy"
+                alt="LiDAR žemės reljefo modelis. Pasirinktas sklypas pažymėtas raudonai."
+                (error)="failedImage.set(preview.url)"
+              />
+            </a>
+          } @else {
+            <p role="status">Reljefo vaizdas šiuo metu nepasiekiamas.</p>
+          }
+          <figcaption>
+            Raudonas kontūras – pasirinktas sklypas. Aukščių mastelis padidintas
+            {{ preview.verticalExaggeration }}×. Spalvos rodo santykinį aukštį; tušti plotai –
+            duomenų spragos. <br />Žemės reljefo modelis · {{ preview.meshResolutionM }} m tinklelis
+            · {{ preview.surveyYearFrom }}–{{ preview.surveyYearTo }} m. atrinkti matavimai.
+            @if (!preview.heightReferenceVerified) {
+              <br />Aukščių atskaitos sistema dar nepatvirtinta. Peržiūra nesuteikia kraštovaizdžio
+              balo.
+            }
+            <small>{{ preview.attribution }}</small>
+          </figcaption>
+        </figure>
+      }
       @if (!detail().summary.analysisId) {
         <p>
           {{
@@ -43,11 +94,11 @@ import { LandscapeDetail, landscapeLabel } from './landscape-api';
         <dl class="facts">
           <div>
             <dt>Tipinis matomas plotas</dt>
-            <dd>{{ number(metrics.visibleAreaKm2) }} km²</dd>
+            <dd>{{ measurement(metrics.visibleAreaKm2, 'km²') }}</dd>
           </div>
           <div>
             <dt>Geriausias taškas</dt>
-            <dd>{{ number(metrics.bestVisibleAreaKm2) }} km²</dd>
+            <dd>{{ measurement(metrics.bestVisibleAreaKm2, 'km²') }}</dd>
           </div>
           <div>
             <dt>Patikrinti stebėjimo taškai</dt>
@@ -55,7 +106,7 @@ import { LandscapeDetail, landscapeLabel } from './landscape-api';
           </div>
           <div>
             <dt>Reljefo aukščių skirtumas</dt>
-            <dd>{{ number(metrics.reliefP90P10M) }} m</dd>
+            <dd>{{ measurement(metrics.reliefP90P10M, 'm') }}</dd>
           </div>
           <div>
             <dt>Natūrali danga aplink</dt>
@@ -81,11 +132,11 @@ import { LandscapeDetail, landscapeLabel } from './landscape-api';
           </div>
           <div>
             <dt>Lėkštas plotas (iki 8°)</dt>
-            <dd>{{ number(metrics.gentleGroundAreaHa, 4) }} ha</dd>
+            <dd>{{ measurement(metrics.gentleGroundAreaHa, 'ha', 4) }}</dd>
           </div>
           <div>
             <dt>Didžiausias vientisas lėkštas plotas</dt>
-            <dd>{{ number(metrics.largestGentlePatchHa, 4) }} ha</dd>
+            <dd>{{ measurement(metrics.largestGentlePatchHa, 'ha', 4) }}</dd>
           </div>
         </dl>
         <p>
@@ -107,7 +158,8 @@ import { LandscapeDetail, landscapeLabel } from './landscape-api';
       @if (
         detail().limitations.includes('insufficient_complete_viewpoints') ||
         detail().limitations.includes('ground_context_incomplete') ||
-        detail().limitations.includes('land_cover_incomplete')
+        detail().limitations.includes('land_cover_incomplete') ||
+        detail().limitations.includes('visible_cover_incomplete')
       ) {
         <p class="note">Duomenų aprėptis nepakankama. Bendras balas neskaičiuojamas.</p>
       }
@@ -131,6 +183,39 @@ import { LandscapeDetail, landscapeLabel } from './landscape-api';
       letter-spacing: 0.15em;
       font-weight: 700;
       color: #326550;
+    }
+    .terrain-preview {
+      margin: 18px 0;
+    }
+    .report-link {
+      display: inline-block;
+      padding: 9px 11px;
+      border: 1px solid #326550;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .terrain-preview h4 {
+      margin: 0 0 10px;
+      color: #174f3e;
+      font-size: 15px;
+    }
+    .terrain-preview img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      background: #f5f6f0;
+    }
+    .terrain-preview figcaption {
+      margin-top: 10px;
+      font-size: 11px;
+      line-height: 1.6;
+      color: #516054;
+    }
+    .terrain-preview small {
+      display: block;
+      margin-top: 6px;
+      font-size: 10px;
     }
     h3 {
       margin: 8px 0 12px;
@@ -193,7 +278,19 @@ import { LandscapeDetail, landscapeLabel } from './landscape-api';
 })
 export class LandscapeDetails {
   readonly detail = input.required<LandscapeDetail>();
-  protected readonly label = computed(() => landscapeLabel(this.detail().summary));
+  protected readonly failedImage = signal<string | null>(null);
+  protected readonly label = computed(() =>
+    this.detail().preliminaryReport
+      ? 'Preliminari ataskaita'
+      : landscapeLabel(this.detail().summary),
+  );
+  protected reportDate(value: string) {
+    return new Intl.DateTimeFormat('lt-LT', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(value));
+  }
   protected readonly quality = computed(
     () =>
       ({ high: 'aukšta', medium: 'vidutinė', low: 'ribota', unknown: 'nežinoma' })[
@@ -215,5 +312,8 @@ export class LandscapeDetails {
     return value === null
       ? 'Neįvertinta'
       : `${value >= saturation ? '≥ ' : ''}${this.number(value, 0)} m`;
+  }
+  protected measurement(value: number | null, unit: string, decimals = 2) {
+    return value === null ? 'Neįvertinta' : `${this.number(value, decimals)} ${unit}`;
   }
 }

@@ -11,6 +11,7 @@ public sealed class SourceOptions
     public int MaxAuctions { get; set; } = 10;
     public int MaxPages { get; set; } = 40;
     public bool ScheduledImportsEnabled { get; set; }
+    public bool ManualImportsEnabled { get; set; }
     public int IntervalMinutes { get; set; } = 60;
 }
 

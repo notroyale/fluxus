@@ -15,7 +15,7 @@ public sealed record LandscapeScores(string Profile, int? Overall, int? Views, i
 public static class LandscapeScore
 {
     public const string Profile = "balanced-retreat-v1";
-    public const string AnalysisVersion = "gdal-grid-v1";
+    public const string AnalysisVersion = "gdal-grid-v2";
 
     public static LandscapeScores Calculate(LandscapeMetrics m)
     {

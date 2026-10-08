@@ -91,4 +91,20 @@ public sealed class LandscapeTests
         var root = Path.Combine(Path.GetTempPath(), "fluxus-test-inputs");
         Assert.Throws<LandscapeInputException>(() => LandscapeBundleReader.ConfinedPath(root, "../elsewhere.tif"));
     }
+
+    [Fact]
+    public void NearbyHiddenWaterCannotCountAsVisibleWater()
+    {
+        var visible = new AsciiGrid(20, 20, 0, 0, 5, -9999, Enumerable.Repeat(255d, 400).ToArray());
+        var cover = new AsciiGrid(20, 20, 0, 0, 5, -9999, Enumerable.Repeat(2d, 400).ToArray());
+        cover.Values[cover.Index(60, 50)] = 3;
+        var observer = new Coordinate(50, 50);
+        Assert.True(LandscapeProcessor.View(visible, cover, observer).VisibleWaterFraction > 0);
+        visible.Values[visible.Index(60, 50)] = 0;
+        Assert.Equal(0, LandscapeProcessor.View(visible, cover, observer).VisibleWaterFraction);
+        cover.Values[cover.Index(40, 50)] = cover.NoData;
+        var incomplete = LandscapeProcessor.View(visible, cover, observer);
+        Assert.Null(incomplete.VisibleWaterFraction); Assert.Null(incomplete.NaturalDiversity);
+        Assert.True(incomplete.VisibleAreaKm2 > 0);
+    }
 }

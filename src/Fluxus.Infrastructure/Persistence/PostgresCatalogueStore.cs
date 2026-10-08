@@ -90,7 +90,11 @@ public sealed class PostgresCatalogueStore(CatalogueDb db, SourceOptions options
         {
             var resolution = resolutions[land.SourceKey];
             var item = auction.Items.SingleOrDefault(i => i.SourceKey == land.SourceKey);
-            if (item is null) { item = new() { SourceKey = land.SourceKey }; auction.Items.Add(item); }
+            if (item is null)
+            {
+                item = new() { SourceKey = land.SourceKey, FirstSeenAt = auction.ObservedAt };
+                auction.Items.Add(item);
+            }
             item.UniqueNumber = land.UniqueNumber; item.CadastralNumber = land.CadastralNumber; item.Address = land.Address;
             item.TotalAreaHa = land.TotalAreaHa; item.SoldAreaHa = land.SoldAreaHa; item.SoldAreaBasis = land.SoldAreaBasis;
             item.Share = land.ShareRaw; item.LandUse = land.LandUse; item.ComponentPriceEur = land.ComponentPriceEur;

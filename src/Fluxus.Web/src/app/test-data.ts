@@ -17,6 +17,7 @@ export const offer: ItemCard = {
   share: '1/2',
   containsNonLandAssets: true,
   resolutionStatus: 'resolved_exact',
+  firstSeenAt: '2026-10-06T17:27:40Z',
   offerType: 'sale',
   ownershipKind: 'partial',
   landscape: {

@@ -21,6 +21,8 @@ public interface IParcelBatchProvider
 }
 
 public sealed record ImportSummary(int Auctions, int Items, int Mapped, int FailedAuctions, bool DiscoveryComplete);
+public sealed record ImportProgress(string Phase, int Auctions, int Items, int Mapped, int FailedAuctions);
+public sealed class ImportAlreadyRunningException() : InvalidOperationException("Another import is already running.");
 
 public interface ICatalogueStore
 {
@@ -35,10 +37,11 @@ public interface ICatalogueStore
 
 public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider provider, ICatalogueStore store)
 {
-    public async Task<ImportSummary> RunAsync(string mode, int maxAuctions, int maxPages, CancellationToken ct)
+    public async Task<ImportSummary> RunAsync(string mode, int maxAuctions, int maxPages, CancellationToken ct,
+        IProgress<ImportProgress>? progress = null)
     {
         await using var importLock = await store.TryAcquireImportLockAsync(ct) ??
-            throw new InvalidOperationException("Another import is already running.");
+            throw new ImportAlreadyRunningException();
         await store.BeginRunAsync(mode, ct);
         var seen = new HashSet<string>();
         var resolved = new Dictionary<string, ParcelResolution>();
@@ -48,6 +51,7 @@ public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider pro
         {
             for (var pages = 0; pages < maxPages; pages++)
             {
+                Report("listing");
                 var page = await source.GetListingAsync(pageNumber, false, ct);
                 var newItems = page.Items.Where(i => seen.Add(i.SourceId)).ToArray();
                 if (newItems.Length == 0 && !page.IsEmpty)
@@ -55,6 +59,7 @@ public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider pro
                 var prepared = new List<(ListingItem Source, ParsedAuction Auction)>();
                 foreach (var listingItem in newItems.Take(maxAuctions - auctions - failed))
                 {
+                    Report("details");
                     try
                     {
                         var auction = await source.GetDetailAsync(listingItem, ct);
@@ -70,20 +75,27 @@ public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider pro
                     {
                         failed++;
                         await store.RecordIssueAsync(listingItem.SourceId, exception.GetType().Name, ct);
+                        Report("details");
                     }
                 }
                 var pending = prepared.SelectMany(p => p.Auction.Items).Where(i => !resolved.ContainsKey(IdentifierKey(i)))
                     .DistinctBy(IdentifierKey).ToArray();
                 if (pending.Length > 0 && provider is IParcelBatchProvider batch)
                 {
+                    Report("geometry");
                     var results = await batch.ResolveBatchAsync(pending, ct);
                     if (results.Count != pending.Length) throw new InvalidOperationException("Parcel batch result count mismatch.");
                     for (var i = 0; i < pending.Length; i++) resolved[IdentifierKey(pending[i])] = results[i];
                 }
                 else
-                    foreach (var item in pending) resolved[IdentifierKey(item)] = await provider.ResolveAsync(item, ct);
+                    foreach (var item in pending)
+                    {
+                        Report("geometry");
+                        resolved[IdentifierKey(item)] = await provider.ResolveAsync(item, ct);
+                    }
                 foreach (var (listingItem, auction) in prepared)
                 {
+                    Report("saving");
                     try
                     {
                         var resolutions = auction.Items.ToDictionary(i => i.SourceKey, i => resolved[IdentifierKey(i)]);
@@ -96,6 +108,7 @@ public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider pro
                         failed++;
                         await store.RecordIssueAsync(listingItem.SourceId, exception.GetType().Name, ct);
                     }
+                    Report("saving");
                 }
                 if (auctions + failed >= maxAuctions) break;
                 if (page.NextPage is null) { complete = failed == 0; break; }
@@ -108,6 +121,8 @@ public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider pro
             await store.CompleteRunAsync(new(auctions, items, mapped, failed, complete), CancellationToken.None);
         }
         return new(auctions, items, mapped, failed, complete);
+
+        void Report(string phase) => progress?.Report(new(phase, auctions, items, mapped, failed));
     }
 
     private static string IdentifierKey(LandItem item) => $"{item.UniqueNumber}|{item.CadastralNumber}";

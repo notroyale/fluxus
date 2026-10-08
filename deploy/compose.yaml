@@ -10,10 +10,14 @@ services:
         condition: service_healthy
     environment:
       ConnectionStrings__Catalogue: Host=db;Port=5432;Database=fluxus;Username=fluxus;Password=${POSTGRES_PASSWORD:-local-development-only};SSL Mode=Disable;GSS Encryption Mode=Disable
-      Source__Mode: Fixture
+      Source__Mode: ${SOURCE_MODE:-Live}
+      Source__MaxAuctions: 100
+      Source__ManualImportsEnabled: true
       Landscape__ArtifactRoot: /landscape-artifacts
+      Landscape__PreviewRoot: /terrain-previews
     volumes:
       - landscape-artifacts:/landscape-artifacts:ro
+      - ../.local/terrain-previews:/terrain-previews:ro
     ports:
       - "127.0.0.1:8080:8080"
   landscape-worker:
@@ -28,6 +32,8 @@ services:
       ConnectionStrings__Catalogue: Host=db;Port=5432;Database=fluxus;Username=fluxus;Password=${POSTGRES_PASSWORD:-local-development-only};SSL Mode=Disable;GSS Encryption Mode=Disable
       Landscape__InputRoot: /inputs
       Landscape__ArtifactRoot: /landscape-artifacts
+      Landscape__ProcessingEnabled: ${LANDSCAPE_PROCESSING_ENABLED:-true}
+      Landscape__MaxArtifactBytes: ${LANDSCAPE_MAX_ARTIFACT_BYTES:-10737418240}
     volumes:
       - ../.local/landscape-inputs:/inputs:ro
       - landscape-artifacts:/landscape-artifacts
@@ -53,6 +59,24 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+  landscape-preparation:
+    profiles: [landscape-preparation]
+    build:
+      context: ..
+      dockerfile: deploy/LandscapePreparation.Dockerfile
+    environment:
+      Landscape__InputRoot: /inputs
+      Landscape__PreparationRoot: /outputs
+      ConnectionStrings__Catalogue: Host=db;Port=5432;Database=fluxus;Username=fluxus;Password=${POSTGRES_PASSWORD:-local-development-only};SSL Mode=Disable;GSS Encryption Mode=Disable
+    volumes:
+      - ../.local/landscape-inputs:/inputs:ro
+      - ../.local/landscape-prepared:/outputs
+    read_only: true
+    tmpfs: [/tmp:size=128m]
+    mem_limit: 4g
+    cpus: 2
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
 volumes:
   postgres:
   landscape-artifacts:

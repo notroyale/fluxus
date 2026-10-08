@@ -50,8 +50,8 @@ export interface LandscapeDetail {
     eyeHeightM: number;
     visibleAreaKm2: number;
     distantDirectionFraction: number;
-    naturalDiversity: number;
-    visibleWaterFraction: number;
+    naturalDiversity: number | null;
+    visibleWaterFraction: number | null;
   }[];
   limitations: string[];
   source: {
@@ -68,6 +68,18 @@ export interface LandscapeDetail {
   } | null;
   failureCode: string | null;
   visibility: VisibilityOverlay | null;
+  preliminaryReport?: { url: string; createdAt: string; offerObservedAt: string } | null;
+  terrainPreview?: {
+    url: string;
+    width: number;
+    height: number;
+    verticalExaggeration: number;
+    meshResolutionM: number;
+    surveyYearFrom: number;
+    surveyYearTo: number;
+    heightReferenceVerified: boolean;
+    attribution: string;
+  } | null;
 }
 function row(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -166,16 +178,11 @@ export function parseLandscapeDetail(value: unknown): LandscapeDetail {
     throw new Error('Netinkami stebėjimo taškai.');
   for (const point of r['viewpoints']) {
     const p = row(point);
-    for (const key of [
-      'x',
-      'y',
-      'eyeHeightM',
-      'visibleAreaKm2',
-      'distantDirectionFraction',
-      'naturalDiversity',
-      'visibleWaterFraction',
-    ])
+    for (const key of ['x', 'y', 'eyeHeightM', 'visibleAreaKm2', 'distantDirectionFraction'])
       if (!finite(p[key])) throw new Error('Netinkamas stebėjimo taškas.');
+    for (const key of ['naturalDiversity', 'visibleWaterFraction'])
+      if (p[key] !== null && (!finite(p[key]) || Number(p[key]) < 0 || Number(p[key]) > 1))
+        throw new Error('Netinkama matoma danga.');
   }
   if (r['source'] !== null) {
     const source = row(r['source']);
@@ -216,6 +223,62 @@ export function parseLandscapeDetail(value: unknown): LandscapeDetail {
       visibility['radiusM'] !== 3000
     )
       throw new Error('Netinkamas matomumo sluoksnis.');
+  }
+  if (r['preliminaryReport'] != null) {
+    const report = row(r['preliminaryReport']);
+    const path =
+      typeof report['url'] === 'string'
+        ? /^\/api\/auction-parcels\/([0-9a-f-]{36})\/preliminary-report\/[0-9a-f]{64}\.pdf$/.exec(
+            report['url'],
+          )
+        : null;
+    if (!path || path[1] !== r['id']) throw new Error('Netinkama ataskaitos nuoroda.');
+    for (const key of ['createdAt', 'offerObservedAt'])
+      if (typeof report[key] !== 'string' || !Number.isFinite(Date.parse(report[key])))
+        throw new Error('Netinkama ataskaitos data.');
+    if (Date.parse(String(report['createdAt'])) < Date.parse(String(report['offerObservedAt'])))
+      throw new Error('Netinkama ataskaitos data.');
+  }
+  if (r['terrainPreview'] != null) {
+    const preview = row(r['terrainPreview']);
+    const path =
+      typeof preview['url'] === 'string'
+        ? /^\/api\/landscape\/parcels\/([0-9a-f-]{36})\/terrain\/[0-9a-f]{64}\.png$/.exec(
+            preview['url'],
+          )
+        : null;
+    if (
+      !path ||
+      path[1] !== r['parcelId'] ||
+      typeof preview['attribution'] !== 'string' ||
+      !preview['attribution'].trim() ||
+      typeof preview['heightReferenceVerified'] !== 'boolean'
+    )
+      throw new Error('Netinkama reljefo peržiūra.');
+    for (const key of ['width', 'height'])
+      if (
+        !finite(preview[key]) ||
+        !Number.isInteger(preview[key]) ||
+        preview[key] < 1 ||
+        preview[key] > 2048
+      )
+        throw new Error('Netinkamas reljefo vaizdo dydis.');
+    if (
+      !finite(preview['verticalExaggeration']) ||
+      preview['verticalExaggeration'] < 1 ||
+      preview['verticalExaggeration'] > 50 ||
+      !finite(preview['meshResolutionM']) ||
+      preview['meshResolutionM'] <= 0 ||
+      preview['meshResolutionM'] > 100 ||
+      !finite(preview['surveyYearFrom']) ||
+      !Number.isInteger(preview['surveyYearFrom']) ||
+      preview['surveyYearFrom'] < 2000 ||
+      !finite(preview['surveyYearTo']) ||
+      !Number.isInteger(preview['surveyYearTo']) ||
+      preview['surveyYearTo'] > 2100 ||
+      preview['surveyYearTo'] < preview['surveyYearFrom']
+    )
+      throw new Error('Netinkami reljefo vaizdo duomenys.');
   }
   return r as unknown as LandscapeDetail;
 }

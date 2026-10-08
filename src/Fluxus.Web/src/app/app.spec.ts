@@ -20,16 +20,42 @@ class TestMap {
 describe('Auction browsing', () => {
   let failCatalog = false;
   let failLandscape = false;
+  let enableRefresh = false;
+  let refreshStarted = false;
   const requests: string[] = [];
   beforeEach(async () => {
     history.replaceState(null, '', '/');
     requests.length = 0;
     failCatalog = false;
     failLandscape = false;
+    enableRefresh = false;
+    refreshStarted = false;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => {
+      vi.fn(async (url: string, init?: RequestInit) => {
         requests.push(url);
+        if (url === '/api/catalog/refresh') {
+          if (init?.method === 'POST') refreshStarted = true;
+          return new Response(
+            JSON.stringify({
+              enabled: enableRefresh,
+              maxAuctions: 100,
+              id: refreshStarted ? '81258336-bb04-4376-8ec6-2eb30b5734c7' : null,
+              status: refreshStarted ? (init?.method === 'POST' ? 'queued' : 'completed') : 'idle',
+              phase: null,
+              startedAt: refreshStarted ? '2026-10-08T10:00:00Z' : null,
+              finishedAt: refreshStarted && init?.method !== 'POST' ? '2026-10-08T10:01:00Z' : null,
+              retryAt: null,
+              auctions: 0,
+              items: 0,
+              mapped: 0,
+              failedAuctions: 0,
+              discoveryComplete: refreshStarted ? false : null,
+              errorCode: null,
+            }),
+            { status: init?.method === 'POST' ? 202 : 200 },
+          );
+        }
         if (url.startsWith('/api/catalog/map'))
           return new Response(JSON.stringify(catalog), { status: failCatalog ? 503 : 200 });
         if (url === '/api/catalog/filters')
@@ -82,6 +108,23 @@ describe('Auction browsing', () => {
     expect(root.textContent).toContain('Pavyzdiniai duomenys');
     expect(root.textContent).toContain('Tai nėra aktualus aukcionų sąrašas');
     expect(root.textContent).toContain('2 pasiūlymai');
+  });
+
+  it('reloads the catalogue and selected report when a manual refresh completes, preserving filters', async () => {
+    enableRefresh = true;
+    history.replaceState(null, '', '/?sort=price_desc&ownershipKind=partial');
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const root: HTMLElement = fixture.nativeElement;
+    root.querySelector<HTMLButtonElement>('.auction-card')!.click();
+    await fixture.whenStable();
+    root.querySelector<HTMLButtonElement>('.refresh-button')!.click();
+    await fixture.whenStable();
+    expect(requests.filter((url) => url.startsWith('/api/catalog/map'))).toHaveLength(2);
+    expect(requests.filter((url) => url.endsWith('/landscape'))).toHaveLength(2);
+    expect(new URLSearchParams(location.search).get('sort')).toBe('price_desc');
+    expect(root.querySelector('.detail-panel')).not.toBeNull();
+    fixture.destroy();
   });
 
   it('explains absent terrain data without inventing a landscape score', async () => {

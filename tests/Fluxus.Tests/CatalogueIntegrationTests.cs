@@ -119,10 +119,15 @@ public sealed class CatalogueIntegrationTests(TestCatalogue catalogue) : IClassF
         var db = scope.ServiceProvider.GetRequiredService<CatalogueDb>();
         var ids = await db.Items.OrderBy(i => i.Id).Select(i => i.Id).ToArrayAsync();
         var fetchedAt = await db.Parcels.OrderBy(p => p.Id).Select(p => p.GeometryFetchedAt).ToArrayAsync();
+        var firstSeen = await db.Items.OrderBy(i => i.Id).Select(i => i.FirstSeenAt).ToArrayAsync();
+        Assert.All(firstSeen, stamp => Assert.NotNull(stamp));
+        Assert.All(await db.Items.Select(i => new { i.FirstSeenAt, i.Auction.ObservedAt }).ToArrayAsync(),
+            item => Assert.Equal(item.ObservedAt, item.FirstSeenAt));
         var summary = await scope.ServiceProvider.GetRequiredService<ImportCoordinator>().RunAsync("Fixture", 10, 40, CancellationToken.None);
         Assert.Equal(10, summary.Auctions); Assert.Equal(11, summary.Items); Assert.Equal(11, summary.Mapped);
         Assert.Equal(ids, await db.Items.OrderBy(i => i.Id).Select(i => i.Id).ToArrayAsync());
         Assert.Equal(fetchedAt, await db.Parcels.OrderBy(p => p.Id).Select(p => p.GeometryFetchedAt).ToArrayAsync());
+        Assert.Equal(firstSeen, await db.Items.OrderBy(i => i.Id).Select(i => i.FirstSeenAt).ToArrayAsync());
         Assert.Equal(10, await db.Parcels.CountAsync());
         var shares = await db.Items.Where(i => i.Auction.SourceId == "337928").ToArrayAsync();
         Assert.Equal(2, shares.Length); Assert.Single(shares.Select(i => i.ParcelId).Distinct());
@@ -173,6 +178,38 @@ public sealed class CatalogueIntegrationTests(TestCatalogue catalogue) : IClassF
         Assert.Equal(HttpStatusCode.BadRequest, (await catalogue.Client.GetAsync("/api/catalog/map?minSoldAreaHa=2&maxSoldAreaHa=1")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await catalogue.Client.GetAsync("/api/catalog/map?status=invalid")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await catalogue.Client.GetAsync($"/api/auction-parcels/{Guid.NewGuid()}/geometry")).StatusCode);
+    }
+
+    [Fact]
+    public async Task RefreshPreservesOldAdditionDatesAndDoesNotInventDatesForLegacyOffers()
+    {
+        using var scope = catalogue.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogueDb>();
+        var options = scope.ServiceProvider.GetRequiredService<SourceOptions>();
+        var observed = options.FixtureObservedAt;
+        var originals = await db.Items.OrderBy(i => i.Id).Take(2).Select(i => new { i.Id, i.FirstSeenAt }).ToArrayAsync();
+        var old = observed!.Value.AddDays(-10);
+        await db.Items.Where(i => i.Id == originals[0].Id).ExecuteUpdateAsync(s => s.SetProperty(i => i.FirstSeenAt, old));
+        await db.Items.Where(i => i.Id == originals[1].Id).ExecuteUpdateAsync(s => s.SetProperty(i => i.FirstSeenAt, (DateTimeOffset?)null));
+        try
+        {
+            options.FixtureObservedAt = observed.Value.AddDays(1);
+            await scope.ServiceProvider.GetRequiredService<ImportCoordinator>().RunAsync("Fixture", 10, 40, CancellationToken.None);
+            var refreshed = await db.Items.AsNoTracking().Include(i => i.Auction).Where(i => i.Id == originals[0].Id).SingleAsync();
+            Assert.True(refreshed.Auction.ObservedAt > observed);
+            Assert.Equal(old.ToUnixTimeMilliseconds(), refreshed.FirstSeenAt!.Value.ToUnixTimeMilliseconds());
+            Assert.Null(await db.Items.Where(i => i.Id == originals[1].Id).Select(i => i.FirstSeenAt).SingleAsync());
+            using var response = JsonDocument.Parse(await catalogue.Client.GetStringAsync("/api/catalog/map"));
+            var card = response.RootElement.GetProperty("items").EnumerateArray().Single(i => i.GetProperty("id").GetGuid() == originals[0].Id);
+            Assert.Equal(old.ToUnixTimeMilliseconds(), card.GetProperty("firstSeenAt").GetDateTimeOffset().ToUnixTimeMilliseconds());
+        }
+        finally
+        {
+            options.FixtureObservedAt = observed;
+            foreach (var item in originals)
+                await db.Items.Where(i => i.Id == item.Id).ExecuteUpdateAsync(s => s.SetProperty(i => i.FirstSeenAt, item.FirstSeenAt));
+            await scope.ServiceProvider.GetRequiredService<ImportCoordinator>().RunAsync("Fixture", 10, 40, CancellationToken.None);
+        }
     }
 
     [Fact]

@@ -8,16 +8,19 @@ public static class ArcGisGeometry
 {
     private static readonly GeometryFactory Factory = new(new PrecisionModel(), 4326);
 
-    public static MultiPolygon Read(JsonElement rings)
+    public static MultiPolygon Read(JsonElement rings, int epsg = 4326)
     {
+        if (epsg is not (4326 or 3346)) throw new ArgumentException("Unsupported geometry CRS.");
+        var factory = new GeometryFactory(new PrecisionModel(), epsg);
         var ringPolygons = rings.EnumerateArray().Select(ring =>
         {
             var coordinates = ring.EnumerateArray().Select(p => new Coordinate(p[0].GetDouble(), p[1].GetDouble())).ToArray();
             if (coordinates.Length < 4 || !coordinates[0].Equals2D(coordinates[^1]) ||
                 coordinates.Any(c => !double.IsFinite(c.X) || !double.IsFinite(c.Y) ||
-                    c.X is < 20.5 or > 27 || c.Y is < 53.7 or > 56.6))
+                    (epsg == 4326 ? c.X is < 20.5 or > 27 || c.Y is < 53.7 or > 56.6 :
+                        c.X is < 200000 or > 800000 || c.Y is < 5900000 or > 6300000)))
                 throw new FormatException("Invalid rings or coordinates outside Lithuania.");
-            var polygon = Factory.CreatePolygon(Factory.CreateLinearRing(coordinates));
+            var polygon = factory.CreatePolygon(factory.CreateLinearRing(coordinates));
             if (!polygon.IsValid || polygon.IsEmpty) throw new FormatException("Invalid parcel ring.");
             return polygon;
         }).OrderByDescending(p => p.Area).ToArray();
@@ -39,9 +42,9 @@ public static class ArcGisGeometry
             if (depths[i] % 2 != 0) continue;
             var holes = Enumerable.Range(0, ringPolygons.Length).Where(j => parents[j] == i && depths[j] % 2 == 1)
                 .Select(j => (LinearRing)ringPolygons[j].ExteriorRing).ToArray();
-            polygons.Add(Factory.CreatePolygon((LinearRing)ringPolygons[i].ExteriorRing, holes));
+            polygons.Add(factory.CreatePolygon((LinearRing)ringPolygons[i].ExteriorRing, holes));
         }
-        var result = Factory.CreateMultiPolygon(polygons.ToArray());
+        var result = factory.CreateMultiPolygon(polygons.ToArray());
         if (!result.IsValid) throw new FormatException("Invalid parcel topology.");
         return result;
     }

@@ -24,14 +24,16 @@ public static class LandscapeEndpoints
 
     public static void MapLandscape(this WebApplication app)
     {
-        app.MapGet("/api/auction-parcels/{id:guid}/landscape", async (Guid id, CatalogueDb db, CancellationToken ct) =>
+        app.MapGet("/api/auction-parcels/{id:guid}/landscape", async (Guid id, CatalogueDb db, TerrainPreviewReader previews, CancellationToken ct) =>
         {
-            var item = await db.Items.AsNoTracking().Include(i => i.Parcel!).ThenInclude(p => p.CurrentLandscapeAnalysis!)
+            var item = await db.Items.AsNoTracking().Include(i => i.Auction).Include(i => i.Parcel!).ThenInclude(p => p.CurrentLandscapeAnalysis!)
                 .ThenInclude(a => a.Dataset).Include(i => i.Parcel!).ThenInclude(p => p.CurrentLandscapeJob)
                 .SingleOrDefaultAsync(i => i.Id == id, ct);
             if (item is null) return Results.NotFound();
             var parcel = item.ResolutionStatus == "resolved_exact" ? item.Parcel : null;
             var analysis = parcel?.CurrentLandscapeAnalysis;
+            var preview = parcel?.Geometry is null ? null : await previews.ReadAsync(parcel.Id, parcel.LandscapeGeometryHash, ct);
+            var report = preview is null ? null : await previews.ReadReportAsync(preview, item.Id, item.Auction.ObservedAt, ct);
             var source = analysis is not null ? LandscapeJson.Read<LandscapeBundle>(analysis.Dataset.Manifest) : null;
             var viewpoints = analysis is not null ? LandscapeJson.Read<LandscapeViewpoint[]>(analysis.Viewpoints) : [];
             double[]? observer = null;
@@ -55,6 +57,18 @@ public static class LandscapeEndpoints
                     groundResolutionM = source.Ground.ResolutionM, surfaceResolutionM = source.Surface.ResolutionM,
                     analysis!.AnalysisVersion },
                 failureCode = parcel?.CurrentLandscapeJob?.FailureCode,
+                preliminaryReport = report is null ? null : new
+                {
+                    url = $"/api/auction-parcels/{item.Id}/preliminary-report/{report.Manifest.Sha256.ToLowerInvariant()}.pdf",
+                    report.Manifest.CreatedAt, report.Manifest.OfferObservedAt
+                },
+                terrainPreview = preview is null ? null : new
+                {
+                    url = $"/api/landscape/parcels/{parcel!.Id}/terrain/{preview.Manifest.ImageSha256.ToLowerInvariant()}.png",
+                    preview.Manifest.Width, preview.Manifest.Height, preview.Manifest.VerticalExaggeration,
+                    preview.Manifest.MeshResolutionM, preview.Manifest.SurveyYearFrom, preview.Manifest.SurveyYearTo,
+                    preview.Manifest.HeightReferenceVerified, preview.Manifest.Attribution
+                },
                 visibility = analysis?.VisibilityArtifact is null || parcel!.LandscapeIsStale ? null : new
                 {
                     url = $"/api/landscape/analyses/{analysis.Id}/visibility.png",
@@ -62,6 +76,32 @@ public static class LandscapeEndpoints
                     observer, eyeHeightM = 1.7, radiusM = 3000
                 }
             });
+        });
+
+        app.MapGet("/api/auction-parcels/{id:guid}/preliminary-report/{hash}.pdf", async (Guid id, string hash,
+            CatalogueDb db, TerrainPreviewReader previews, CancellationToken ct) =>
+        {
+            if (hash.Length != 64 || hash.Any(c => !Uri.IsHexDigit(c))) return Results.NotFound();
+            var item = await db.Items.AsNoTracking().Include(i => i.Auction).Include(i => i.Parcel)
+                .SingleOrDefaultAsync(i => i.Id == id && i.ResolutionStatus == "resolved_exact", ct);
+            var parcel = item?.Parcel;
+            var preview = parcel?.Geometry is null ? null : await previews.ReadAsync(parcel.Id, parcel.LandscapeGeometryHash, ct);
+            var report = preview is null ? null : await previews.ReadReportAsync(preview, id, item!.Auction.ObservedAt, ct);
+            if (report is null || !hash.Equals(report.Manifest.Sha256, StringComparison.OrdinalIgnoreCase)) return Results.NotFound();
+            return Results.File(report.Pdf, "application/pdf", entityTag:
+                new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{report.Manifest.Sha256.ToLowerInvariant()}\""));
+        });
+
+        app.MapGet("/api/landscape/parcels/{id:guid}/terrain/{hash}.png", async (Guid id, string hash,
+            CatalogueDb db, TerrainPreviewReader previews, CancellationToken ct) =>
+        {
+            if (hash.Length != 64 || hash.Any(c => !Uri.IsHexDigit(c))) return Results.NotFound();
+            var parcel = await db.Parcels.AsNoTracking().SingleOrDefaultAsync(p => p.Id == id &&
+                p.ResolutionStatus == "resolved_exact" && p.Geometry != null, ct);
+            var preview = parcel is null ? null : await previews.ReadAsync(id, parcel.LandscapeGeometryHash, ct);
+            if (preview is null || !hash.Equals(preview.Manifest.ImageSha256, StringComparison.OrdinalIgnoreCase)) return Results.NotFound();
+            return Results.File(preview.Image, "image/png", entityTag:
+                new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{preview.Manifest.ImageSha256.ToLowerInvariant()}\""));
         });
 
         app.MapGet("/api/landscape/analyses/{id:guid}/visibility.png", async (Guid id, CatalogueDb db,

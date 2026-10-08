@@ -9,6 +9,13 @@ describe('API boundary validation', () => {
     malformed.features[0].geometry.coordinates[0] = Number.NaN;
     expect(() => parseCatalog(malformed)).toThrow('Netinkamos koordinatės');
   });
+  it('accepts an unknown addition date and rejects malformed dates in cards and map features', () => {
+    const value = structuredClone(catalog);
+    value.items[0].firstSeenAt = null;
+    expect(parseCatalog(value).items[0].firstSeenAt).toBeNull();
+    value.features[0].properties.firstSeenAt = 'invalid';
+    expect(() => parseCatalog(value)).toThrow('pridėjimo data');
+  });
   it('rejects a source link outside the official auction site', async () => {
     vi.stubGlobal(
       'fetch',

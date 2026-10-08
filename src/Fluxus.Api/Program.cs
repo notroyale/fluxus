@@ -29,6 +29,7 @@ if (options.Mode == "Fixture")
 }
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(new Fluxus.Infrastructure.Landscape.TerrainPreviewReader(builder.Configuration["Landscape:PreviewRoot"]));
 builder.Services.AddSingleton<AuctionParser>();
 builder.Services.AddSingleton(_ => new NpgsqlDataSourceBuilder(builder.Configuration.GetConnectionString("Catalogue") ??
     throw new InvalidOperationException("Catalogue connection is required.")).UseNetTopologySuite().Build());
@@ -41,6 +42,8 @@ builder.Services.AddHttpClient<IAuctionSource, EvarzytynesSource>(http =>
 builder.Services.AddHttpClient<IParcelProvider, GeoportalProvider>(http => http.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddScoped<ICatalogueStore, PostgresCatalogueStore>();
 builder.Services.AddScoped<ImportCoordinator>();
+builder.Services.AddSingleton<CatalogueRefresh>();
+builder.Services.AddHostedService<CatalogueRefreshWorker>();
 builder.Services.AddHostedService<ImportScheduler>();
 builder.Services.AddProblemDetails();
 var app = builder.Build();
@@ -62,6 +65,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/health/ready", async (CatalogueDb db, CancellationToken ct) =>
     await db.Database.CanConnectAsync(ct) ? Results.Ok(new { status = "ok" }) : Results.StatusCode(503));
 app.MapCatalogue();
+app.MapCatalogueRefresh();
 app.MapLandscape();
 app.UseDefaultFiles();
 app.UseStaticFiles();

@@ -27,6 +27,7 @@ export interface ItemCard {
   offerType: 'sale' | 'rent' | 'unknown';
   ownershipKind: 'full' | 'partial' | 'unknown' | 'not_applicable';
   landscape: LandscapeSummary;
+  firstSeenAt: string | null;
 }
 export interface Catalog extends FeatureCollection<Point, ItemCard> {
   items: ItemCard[];
@@ -108,6 +109,11 @@ function nullableNumber(value: unknown): value is number | null {
 }
 function item(value: unknown): ItemCard {
   const row = object(value);
+  if (
+    row['firstSeenAt'] !== null &&
+    (typeof row['firstSeenAt'] !== 'string' || !Number.isFinite(Date.parse(row['firstSeenAt'])))
+  )
+    throw new Error('Netinkama pasiūlymo pridėjimo data.');
   parseLandscapeSummary(row['landscape']);
   if (
     !['sale', 'rent', 'unknown'].includes(String(row['offerType'])) ||

@@ -6,7 +6,7 @@ public sealed class GdalRunner(string? binaryDirectory = null)
 {
     public async Task<string> RunAsync(string tool, IEnumerable<string> args, CancellationToken ct)
     {
-        if (tool is not ("gdalinfo" or "gdalwarp" or "gdal_translate" or "gdal_viewshed"))
+        if (tool is not ("gdalinfo" or "gdalsrsinfo" or "gdalwarp" or "gdal_translate" or "gdal_viewshed" or "gdal_rasterize"))
             throw new ArgumentException("Unsupported terrain tool.");
         var executable = string.IsNullOrWhiteSpace(binaryDirectory) ? tool : Path.Combine(binaryDirectory, tool);
         var start = new ProcessStartInfo(executable)

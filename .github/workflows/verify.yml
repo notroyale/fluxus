@@ -23,6 +23,10 @@ jobs:
           global-json-file: global.json
       - run: dotnet restore Fluxus.slnx --locked-mode
       - run: dotnet test Fluxus.slnx --no-restore --verbosity minimal
+      - run: docker build -f deploy/Landscape.Dockerfile -t fluxus-landscape-worker .
+      - run: docker run --rm --memory=4g --cpus=2 --tmpfs /tmp:size=512m fluxus-landscape-worker --self-test
+      - run: docker build -f deploy/LandscapePreparation.Dockerfile -t fluxus-landscape-preparation .
+      - run: docker run --rm --memory=4g --cpus=2 --tmpfs /tmp:size=128m fluxus-landscape-preparation --preparation-self-test
       - uses: actions/setup-node@v4
         with:
           node-version: 24.19.0

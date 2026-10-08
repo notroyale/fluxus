@@ -14,10 +14,11 @@ import { AuctionMap } from './auction-map';
 import { CatalogApi, defaultFilters, Filters, ItemCard } from './catalog-api';
 import { landscapeLabel } from './landscape-api';
 import { LandscapeDetails } from './landscape-details';
+import { CatalogRefresh } from './catalog-refresh';
 
 @Component({
   selector: 'app-root',
-  imports: [AuctionMap, LandscapeDetails],
+  imports: [AuctionMap, LandscapeDetails, CatalogRefresh],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -124,6 +125,14 @@ export class App {
       window.removeEventListener('keydown', onKey);
       clearInterval(clock);
     });
+  }
+  protected reloadCatalogue() {
+    this.catalog.reload();
+    this.municipalities.reload();
+    this.detail.reload();
+    this.geometry.reload();
+    this.landscape.reload();
+    this.now.set(Date.now());
   }
   protected updateFilter(key: keyof Filters, value: string) {
     this.draft.update((current) => ({

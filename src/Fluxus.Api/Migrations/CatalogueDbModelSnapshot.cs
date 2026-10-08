@@ -267,6 +267,9 @@ namespace Fluxus.Api.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<DateTimeOffset?>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Issues")
                         .IsRequired()
                         .HasColumnType("jsonb");

@@ -16,6 +16,7 @@ import type { FeatureCollection, MultiPolygon, Point } from 'geojson';
 import type { GeoJSONSource, Map, MapMouseEvent } from 'maplibre-gl';
 import type { ItemCard } from './catalog-api';
 import type { VisibilityOverlay } from './landscape-api';
+import { isRecentlyAdded } from './offer-recency';
 
 @Component({
   selector: 'app-auction-map',
@@ -25,6 +26,7 @@ import type { VisibilityOverlay } from './landscape-api';
     @for (label of clusterLabels(); track label.id) {
       <span
         class="cluster-label"
+        [class.recent]="label.recent"
         aria-hidden="true"
         [style.left.px]="label.x"
         [style.top.px]="label.y"
@@ -91,6 +93,9 @@ import type { VisibilityOverlay } from './landscape-api';
       box-shadow: 0 8px 35px #172e2330;
       min-width: 240px;
     }
+    .cluster-label.recent {
+      color: #123f2e;
+    }
     .map-choices button {
       display: block;
       margin-top: 10px;
@@ -113,17 +118,25 @@ export class AuctionMap {
   protected readonly error = signal<string | null>(null);
   protected readonly visibilityError = signal<string | null>(null);
   protected readonly choices = signal<ItemCard[]>([]);
-  protected readonly clusterLabels = signal<{ id: number; count: number; x: number; y: number }[]>(
-    [],
-  );
+  protected readonly clusterLabels = signal<
+    { id: number; count: number; x: number; y: number; recent: boolean }[]
+  >([]);
   private map?: Map;
   private resizeObserver?: ResizeObserver;
   private lastBoundary: MultiPolygon | null = null;
+  private readonly now = signal(Date.now());
   private readonly points = computed(() => ({
     type: 'FeatureCollection' as const,
-    features: this.features().features,
+    features: this.features().features.map((feature) => ({
+      ...feature,
+      properties: {
+        ...feature.properties,
+        recentlyAdded: isRecentlyAdded(feature.properties.firstSeenAt, this.now()),
+      },
+    })),
   }));
   constructor() {
+    const clock = setInterval(() => this.now.set(Date.now()), 60_000);
     afterNextRender(() => {
       void this.initialize();
     });
@@ -144,6 +157,7 @@ export class AuctionMap {
       this.lastBoundary = boundary;
     });
     this.destroy.onDestroy(() => {
+      clearInterval(clock);
       this.resizeObserver?.disconnect();
       this.map?.remove();
     });
@@ -267,6 +281,7 @@ export class AuctionMap {
           cluster: true,
           clusterRadius: 42,
           clusterMaxZoom: 15,
+          clusterProperties: { recentCount: ['+', ['case', ['get', 'recentlyAdded'], 1, 0]] },
         });
         map.addSource('boundary', {
           type: 'geojson',
@@ -290,7 +305,12 @@ export class AuctionMap {
           source: 'offers',
           filter: ['has', 'point_count'],
           paint: {
-            'circle-color': '#145e4c',
+            'circle-color': [
+              'case',
+              ['==', ['get', 'recentCount'], ['get', 'point_count']],
+              '#77c79d',
+              '#145e4c',
+            ],
             'circle-radius': ['step', ['get', 'point_count'], 18, 10, 24, 50, 30],
             'circle-stroke-width': 4,
             'circle-stroke-color': '#ffffff',
@@ -303,7 +323,7 @@ export class AuctionMap {
           source: 'offers',
           filter: ['!', ['has', 'point_count']],
           paint: {
-            'circle-color': '#167b5b',
+            'circle-color': ['case', ['get', 'recentlyAdded'], '#77c79d', '#167b5b'],
             'circle-radius': 8,
             'circle-stroke-width': 3,
             'circle-stroke-color': '#fff',
@@ -343,7 +363,7 @@ export class AuctionMap {
         }
         map.on('render', () => {
           const seen = new Set<number>();
-          const labels: { id: number; count: number; x: number; y: number }[] = [];
+          const labels: { id: number; count: number; x: number; y: number; recent: boolean }[] = [];
           for (const feature of map.queryRenderedFeatures({ layers: ['clusters'] })) {
             if (feature.geometry.type !== 'Point') continue;
             const id = Number(feature.properties['cluster_id']);
@@ -355,6 +375,9 @@ export class AuctionMap {
               count: Number(feature.properties['point_count']),
               x: Math.round(point.x),
               y: Math.round(point.y),
+              recent:
+                Number(feature.properties['recentCount']) ===
+                Number(feature.properties['point_count']),
             });
           }
           const previous = this.clusterLabels();
@@ -364,6 +387,7 @@ export class AuctionMap {
               (label, i) =>
                 label.id !== previous[i]?.id ||
                 label.count !== previous[i]?.count ||
+                label.recent !== previous[i]?.recent ||
                 label.x !== previous[i]?.x ||
                 label.y !== previous[i]?.y,
             )
