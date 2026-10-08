@@ -15,16 +15,32 @@ import { CatalogApi, defaultFilters, Filters, ItemCard } from './catalog-api';
 import { landscapeLabel } from './landscape-api';
 import { LandscapeDetails } from './landscape-details';
 import { CatalogRefresh } from './catalog-refresh';
+import { AuctionHistory } from './auction-history';
+import { OfferChanges } from './offer-changes';
+import { SaveOffer } from './save-offer';
+import { Shortlist } from './shortlist';
+import { ShortlistStore } from './shortlist-store';
+import { OfferTrackingApi } from './offer-tracking-api';
 
 @Component({
   selector: 'app-root',
-  imports: [AuctionMap, LandscapeDetails, CatalogRefresh],
+  imports: [
+    AuctionMap,
+    LandscapeDetails,
+    CatalogRefresh,
+    AuctionHistory,
+    OfferChanges,
+    SaveOffer,
+    Shortlist,
+  ],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class App {
   private readonly api = inject(CatalogApi);
+  private readonly tracking = inject(OfferTrackingApi);
+  protected readonly shortlist = inject(ShortlistStore);
   private readonly destroy = inject(DestroyRef);
   private readonly detailPanel = viewChild<ElementRef<HTMLElement>>('detailPanel');
   private readonly selectedAuctionId = signal<string | undefined>(undefined);
@@ -52,11 +68,19 @@ export class App {
   protected readonly municipalities = resource({
     loader: ({ abortSignal }) => this.api.municipalities(abortSignal),
   });
+  protected readonly selectedOffer = resource({
+    params: () => this.selectedId() ?? undefined,
+    loader: ({ params, abortSignal }) => this.tracking.shortlist([params], abortSignal),
+  });
   private readonly auctionId = computed(() =>
     this.selectedId()
       ? ((this.catalog.hasValue()
           ? this.catalog.value().items.find((i) => i.id === this.selectedId())?.auctionId
-          : undefined) ?? this.selectedAuctionId())
+          : undefined) ??
+        this.selectedAuctionId() ??
+        (this.selectedOffer.hasValue()
+          ? this.selectedOffer.value().items[0]?.auctionId
+          : undefined))
       : undefined,
   );
   protected readonly detail = resource({
@@ -70,7 +94,8 @@ export class App {
         : undefined) ??
       (this.detail.hasValue()
         ? this.detail.value().items.find((i) => i.card.id === this.selectedId())?.card
-        : undefined),
+        : undefined) ??
+      (this.selectedOffer.hasValue() ? this.selectedOffer.value().items[0] : undefined),
   );
   protected readonly geometry = resource({
     params: () => this.selectedId() ?? undefined,
@@ -92,7 +117,7 @@ export class App {
       unresolved: items.every((i) => i.resolutionStatus !== 'resolved_exact'),
     }));
   });
-  private readonly now = signal(Date.now());
+  protected readonly now = signal(Date.now());
   protected readonly stale = computed(
     () =>
       this.catalog.hasValue() &&
@@ -132,6 +157,8 @@ export class App {
     this.detail.reload();
     this.geometry.reload();
     this.landscape.reload();
+    this.selectedOffer.reload();
+    this.shortlist.offers.reload();
     this.now.set(Date.now());
   }
   protected updateFilter(key: keyof Filters, value: string) {
@@ -184,7 +211,7 @@ export class App {
     this.selectedAuctionId.set(undefined);
     this.writeUrl();
   }
-  protected select(id: string) {
+  protected select(id: string, auctionId?: string) {
     const card =
       (this.catalog.hasValue() ? this.catalog.value().items.find((i) => i.id === id) : undefined) ??
       (this.detail.hasValue()
@@ -192,7 +219,7 @@ export class App {
         : undefined);
     this.lastTrigger =
       document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    this.selectedAuctionId.set(card?.auctionId);
+    this.selectedAuctionId.set(auctionId ?? card?.auctionId);
     this.selectedId.set(id);
     this.mobileView.set('map');
     this.writeUrl();

@@ -1,0 +1,66 @@
+<details (toggle)="expanded.set($any($event.target).open)">
+  <summary>Aukciono pakeitimų istorija</summary>
+  <p>
+    Stebėti viso aukciono pakeitimai. Pradinė kaina skiriasi nuo dalyvių pasiūlymų. Baigtas
+    aukcionas savaime nepatvirtina pardavimo.
+  </p>
+  @if (history.isLoading()) {
+    <p role="status">Įkeliama istorija…</p>
+  } @else if (history.error()) {
+    <p role="alert">Istorijos įkelti nepavyko.</p>
+    <button type="button" (click)="history.reload()">Bandyti dar kartą</button>
+  } @else if (history.hasValue()) {
+    @if (history.value().truncated) {
+      <p>Rodomi naujausi 50 iš {{ history.value().total }} įrašų.</p>
+    }
+    <ol>
+      @for (entry of history.value().observations; track entry.id) {
+        <li>
+          <time [attr.datetime]="entry.observedAt">{{ date(entry.observedAt) }}</time>
+          @if (entry.fixtureMode) {
+            <small>Užfiksuoto šaltinio pavyzdys</small>
+          }
+          @if (entry.kind === 'baseline' || entry.kind === 'added') {
+            <strong>{{
+              entry.kind === 'baseline' ? 'Istorijos atskaitos įrašas' : 'Pirmą kartą pridėtas'
+            }}</strong>
+            <span
+              >Pradinė kaina: {{ money(entry.initialPriceEur) }} · {{ status(entry.status) }}</span
+            >
+            <span>Paskutinis pasiūlymas: {{ money(entry.lastBidEur) }}</span>
+            <span>Pabaiga: {{ date(entry.endsAt) }} · Žemės pasiūlymų: {{ entry.offerCount }}</span>
+          }
+          @if (entry.priceChanged) {
+            <strong
+              >Pradinė kaina: {{ money(entry.previousInitialPriceEur) }} →
+              {{ money(entry.initialPriceEur) }}</strong
+            >
+          }
+          @if (entry.bidChanged) {
+            <span
+              >Paskutinis pasiūlymas: {{ money(entry.previousLastBidEur) }} →
+              {{ money(entry.lastBidEur) }}</span
+            >
+          }
+          @if (entry.statusChanged) {
+            <span
+              >Būsena: {{ status(entry.previousStatus ?? '') }} → {{ status(entry.status) }}</span
+            >
+          }
+          @if (entry.deadlineChanged) {
+            <span>Pabaiga: {{ date(entry.previousEndsAt) }} → {{ date(entry.endsAt) }}</span>
+          }
+          @if (entry.offersChanged) {
+            <span>Pasikeitė žemės pasiūlymų sudėtis · dabar {{ entry.offerCount }}</span>
+          }
+        </li>
+      } @empty {
+        <p>Pakeitimų dar neužfiksuota. Istorija bus renkama atnaujinant duomenis.</p>
+      }
+    </ol>
+    <p>
+      Laikas rodo, kada pakeitimą pastebėjome (Vilniaus laiku). Ankstesni pakeitimai nežinomi. Nuo
+      paskutinio įrašo nepakitęs aukcionas naujo įrašo nesukuria.
+    </p>
+  }
+</details>

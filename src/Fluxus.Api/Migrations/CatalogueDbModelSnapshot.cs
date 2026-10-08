@@ -223,6 +223,19 @@ namespace Fluxus.Api.Migrations
                     b.Property<DateTimeOffset>("ObservedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("OfferCount")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("PreviousInitialPriceEur")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("PreviousStatus")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("PriceChangedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("SourceId")
                         .IsRequired()
                         .HasColumnType("text");
@@ -237,6 +250,9 @@ namespace Fluxus.Api.Migrations
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("StatusChangedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -270,12 +286,20 @@ namespace Fluxus.Api.Migrations
                     b.Property<DateTimeOffset?>("FirstSeenAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("IsPresent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("Issues")
                         .IsRequired()
                         .HasColumnType("jsonb");
 
                     b.Property<string>("LandUse")
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("MissingSince")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("OfferType")
                         .IsRequired()
@@ -322,6 +346,80 @@ namespace Fluxus.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("auction_items", (string)null);
+                });
+
+            modelBuilder.Entity("Fluxus.Infrastructure.Persistence.AuctionObservationEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AuctionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("BidChanged")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("DeadlineChanged")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("EndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("InitialPriceEur")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("LastBidEur")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("ObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("OfferCount")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("OffersChanged")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("PreviousEndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("PreviousInitialPriceEur")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal?>("PreviousLastBidEur")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("PreviousStatus")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("PriceChanged")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("StatusChanged")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuctionId", "ObservedAt");
+
+                    b.ToTable("auction_observations", (string)null);
                 });
 
             modelBuilder.Entity("Fluxus.Infrastructure.Persistence.ImportIssueEntity", b =>
@@ -521,6 +619,15 @@ namespace Fluxus.Api.Migrations
                     b.Navigation("Auction");
 
                     b.Navigation("Parcel");
+                });
+
+            modelBuilder.Entity("Fluxus.Infrastructure.Persistence.AuctionObservationEntity", b =>
+                {
+                    b.HasOne("Fluxus.Infrastructure.Persistence.AuctionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AuctionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Fluxus.Infrastructure.Persistence.ImportIssueEntity", b =>

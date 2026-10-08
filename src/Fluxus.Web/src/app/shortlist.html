@@ -1,0 +1,230 @@
+<button class="toolbar" type="button" (click)="open.set(true)">
+  Išsaugoti ({{ store.ids().length }})
+</button>
+<dialog
+  #panel
+  aria-labelledby="shortlist-title"
+  (cancel)="open.set(false)"
+  (close)="open.set(false)"
+  (keydown.escape)="$event.stopPropagation()"
+>
+  <header>
+    <div>
+      <p class="eyebrow">JŪSŲ PASIRINKIMAI</p>
+      <h2 id="shortlist-title">Sklypų palyginimas</h2>
+    </div>
+    <button class="close" type="button" (click)="open.set(false)" aria-label="Uždaryti palyginimą">
+      ×
+    </button>
+  </header>
+  <p class="intro">
+    Išsaugokite iki 4 žemės pasiūlymų. Sąrašas saugomas šioje naršyklėje ir nepriklauso nuo
+    žemėlapio filtrų.
+  </p>
+  @if (store.message(); as message) {
+    <p role="status">{{ message }}</p>
+  }
+  @if (store.ids().length === 0) {
+    <div class="empty">
+      <strong>Dar neturite išsaugotų sklypų</strong>
+      <p>Sąraše arba sklypo informacijoje spauskite „☆ Išsaugoti“, tada grįžkite palyginti.</p>
+    </div>
+  } @else if (store.offers.isLoading()) {
+    <p role="status">Įkeliami išsaugoti sklypai…</p>
+  } @else if (store.offers.error()) {
+    <p role="alert">Išsaugotų sklypų įkelti nepavyko.</p>
+    <button type="button" (click)="store.offers.reload()">Bandyti dar kartą</button>
+    @for (id of store.ids(); track id) {
+      <p>
+        Pasiūlymas {{ id }}
+        <button type="button" (click)="store.remove(id)">Pašalinti iš sąrašo</button>
+      </p>
+    }
+  } @else if (store.offers.hasValue()) {
+    @for (id of store.offers.value().missingIds; track id) {
+      <p>
+        Pasiūlymas {{ id }} kataloge nerastas.
+        <button type="button" (click)="store.remove(id)">Pašalinti nerastą pasiūlymą</button>
+      </p>
+    }
+    @if (store.offers.value().items.length) {
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Sklypų palyginimo lentelė">
+        <table>
+          <caption>
+            Palyginimas pagal paskutinius išsaugotus duomenis
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Rodiklis</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <th scope="col">
+                  <strong>{{ card.municipalityName ?? 'Vieta tikslinama' }}</strong
+                  ><span>{{ card.address ?? 'Adresas nenurodytas' }}</span
+                  ><span
+                    >Aukcionas Nr. {{ card.number }} · {{ card.share ?? 'Dalis nenurodyta' }}</span
+                  ><app-offer-changes [card]="card" [now]="now()" />
+                  <div class="actions">
+                    <button type="button" (click)="showOffer(card)">Atverti sklypą</button
+                    ><button
+                      type="button"
+                      (click)="store.remove(card.id)"
+                      [attr.aria-label]="'Pašalinti sklypą · ' + card.number"
+                    >
+                      Pašalinti
+                    </button>
+                  </div>
+                </th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Pasiūlymas</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>
+                  {{
+                    card.offerType === 'sale'
+                      ? 'Parduodama'
+                      : card.offerType === 'rent'
+                        ? 'Nuomojama'
+                        : 'Tipas nenurodytas'
+                  }}
+                </td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Stebėta būsena</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>
+                  {{ status(card.status)
+                  }}<small>{{
+                    card.isPresent
+                      ? 'Rodomas paskutinėje detalėje'
+                      : 'Detalėje neberodomas nuo ' + date(card.missingSince)
+                  }}</small>
+                </td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Viso aukciono pradinė kaina</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td class="price">
+                  {{ money(card.initialPriceEur)
+                  }}<small
+                    >Žemės pasiūlymų: {{ card.auctionOfferCount
+                    }}{{ card.containsNonLandAssets ? ' ir kitas turtas' : '' }}</small
+                  >
+                </td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Atskira šio pasiūlymo kaina</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>{{ money(card.componentPriceEur) }}</td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Pardavimo kaina / ha</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>
+                  {{
+                    card.pricePerHaEur === null
+                      ? 'Nepalyginama'
+                      : money(card.pricePerHaEur) + ' / ha'
+                  }}<small>{{
+                    card.pricePerHaEur === null
+                      ? 'Nuoma, komplekto kaina arba trūksta patikimo ploto / kainos'
+                      : 'Pagal pradinę arba atskirą kainą ir parduodamą plotą'
+                  }}</small>
+                </td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Nuosavybė</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>
+                  {{ ownership(card.ownershipKind)
+                  }}<small>{{ card.share ?? 'Dalis nenurodyta' }}</small>
+                </td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Siūlomas plotas</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>
+                  {{ area(card.soldAreaHa)
+                  }}<small>{{
+                    card.soldAreaBasis === 'derived'
+                      ? 'Apskaičiuotas pagal dalį'
+                      : card.soldAreaBasis === 'conflict'
+                        ? 'Ploto duomenys nesutampa'
+                        : ''
+                  }}</small>
+                </td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Viso sklypo plotas</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>{{ area(card.totalAreaHa) }}</td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Vietos patikimumas</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>
+                  {{
+                    card.resolutionStatus === 'resolved_exact'
+                      ? 'Tikslios kadastro ribos'
+                      : 'Vieta nepatvirtinta'
+                  }}
+                </td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Kraštovaizdis</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>
+                  {{ landscapeLabel(card.landscape)
+                  }}<small>{{
+                    card.landscape.computedAt
+                      ? 'Vertinta ' + date(card.landscape.computedAt)
+                      : 'Vertinimo data nežinoma'
+                  }}</small>
+                </td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Paskutinis stebėtas pasiūlymas</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>{{ money(card.lastBidEur) }}</td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Aukciono pabaiga</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>{{ date(card.endsAt) }}</td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Pridėta į katalogą</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>{{ card.firstSeenAt ? date(card.firstSeenAt) : 'Data nežinoma' }}</td>
+              }
+            </tr>
+            <tr>
+              <th scope="row">Paskutinį kartą stebėta</th>
+              @for (card of store.offers.value().items; track card.id) {
+                <td>{{ date(card.observedAt) }}</td>
+              }
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    }
+    <p class="intro">
+      Kraštovaizdžio ataskaitą ir reljefo peržiūrą rasite atvėrę sklypą. Privažiavimas, užliejimas
+      ir saugomų teritorijų apribojimai dar nepalyginami.
+    </p>
+  }
+</dialog>

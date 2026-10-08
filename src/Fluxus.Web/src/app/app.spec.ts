@@ -7,6 +7,7 @@ import { AuctionMap } from './auction-map';
 import type { ItemCard } from './catalog-api';
 import type { VisibilityOverlay } from './landscape-api';
 import { catalog, detail } from './test-data';
+import { shortlistKey } from './shortlist-store';
 
 @Component({ selector: 'app-auction-map', template: '' })
 class TestMap {
@@ -22,14 +23,32 @@ describe('Auction browsing', () => {
   let failLandscape = false;
   let enableRefresh = false;
   let refreshStarted = false;
+  let hideCatalog = false;
+  let failShortlist = false;
   const requests: string[] = [];
   beforeEach(async () => {
+    localStorage.clear();
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.open = true;
+      },
+    });
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.open = false;
+        this.dispatchEvent(new Event('close'));
+      },
+    });
     history.replaceState(null, '', '/');
     requests.length = 0;
     failCatalog = false;
     failLandscape = false;
     enableRefresh = false;
     refreshStarted = false;
+    hideCatalog = false;
+    failShortlist = false;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -57,9 +76,35 @@ describe('Auction browsing', () => {
           );
         }
         if (url.startsWith('/api/catalog/map'))
-          return new Response(JSON.stringify(catalog), { status: failCatalog ? 503 : 200 });
+          return new Response(
+            JSON.stringify(
+              hideCatalog
+                ? {
+                    ...catalog,
+                    items: [],
+                    features: [],
+                    meta: { ...catalog.meta, auctions: 0, items: 0, mapped: 0 },
+                  }
+                : catalog,
+            ),
+            { status: failCatalog ? 503 : 200 },
+          );
         if (url === '/api/catalog/filters')
           return new Response(JSON.stringify([{ code: '73', name: 'Rokiškio rajono' }]));
+        if (url.startsWith('/api/catalog/shortlist')) {
+          const ids = new URL(url, location.origin).searchParams.get('ids')!.split(',');
+          return new Response(
+            JSON.stringify({
+              items: catalog.items.filter((item) => ids.includes(item.id)),
+              missingIds: ids.filter((id) => !catalog.items.some((item) => item.id === id)),
+            }),
+            { status: failShortlist ? 503 : 200 },
+          );
+        }
+        if (url.endsWith('/history'))
+          return new Response(
+            JSON.stringify({ auctionId: detail.id, observations: [], total: 0, truncated: false }),
+          );
         if (url.startsWith('/api/auctions/')) return new Response(JSON.stringify(detail));
         if (url.endsWith('/landscape'))
           return new Response(
@@ -94,6 +139,84 @@ describe('Auction browsing', () => {
       add: { imports: [TestMap] },
     });
     await TestBed.compileComponents();
+  });
+
+  it('saves individual shares, compares them outside filters and restores selection after reloading', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const root: HTMLElement = fixture.nativeElement;
+    const saves = root.querySelectorAll<HTMLButtonElement>('.results app-save-offer button');
+    saves[0].click();
+    saves[1].click();
+    await fixture.whenStable();
+    expect(JSON.parse(localStorage.getItem(shortlistKey)!)).toEqual(['offer-1', 'offer-2']);
+    expect(root.querySelector('app-shortlist .toolbar')?.textContent).toContain('(2)');
+    hideCatalog = true;
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    await fixture.whenStable();
+    (root.querySelector('app-shortlist .toolbar') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(root.querySelector('dialog')?.open).toBe(true);
+    expect(root.querySelectorAll('dialog thead th')).toHaveLength(3);
+    expect(root.querySelector('dialog')?.textContent).toContain('Nepalyginama');
+    (root.querySelector('dialog .actions button') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(root.querySelector('dialog')?.open).toBe(false);
+    expect(root.querySelector('.detail-panel')?.textContent).toContain('337250');
+    expect(location.search).toContain('parcel=offer-1');
+    fixture.destroy();
+    const reloaded = TestBed.createComponent(App);
+    await reloaded.whenStable();
+    expect(reloaded.nativeElement.querySelector('.detail-panel')?.textContent).toContain('337250');
+    expect(reloaded.nativeElement.querySelector('app-shortlist .toolbar')?.textContent).toContain(
+      '(2)',
+    );
+  });
+
+  it('shows missing saved offers and lets removal free a full shortlist', async () => {
+    localStorage.setItem(
+      shortlistKey,
+      JSON.stringify(['missing-1', 'missing-2', 'missing-3', 'missing-4']),
+    );
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const root: HTMLElement = fixture.nativeElement;
+    (root.querySelector('.results app-save-offer button') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(root.querySelector('.results')?.textContent).toContain('iki 4 sklypų');
+    (root.querySelector('app-shortlist .toolbar') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(root.querySelector('dialog')?.textContent).toContain('kataloge nerastas');
+    const missingButton = [...root.querySelectorAll<HTMLButtonElement>('dialog button')].find(
+      (button) => button.textContent?.includes('Pašalinti nerastą'),
+    )!;
+    missingButton.click();
+    await fixture.whenStable();
+    (root.querySelector('dialog .close') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    (root.querySelector('.results app-save-offer button') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(JSON.parse(localStorage.getItem(shortlistKey)!)).toContain('offer-1');
+    expect(JSON.parse(localStorage.getItem(shortlistKey)!)).toHaveLength(4);
+  });
+
+  it('shows a failed shortlist read and retries without losing saved IDs', async () => {
+    localStorage.setItem(shortlistKey, JSON.stringify(['offer-1']));
+    failShortlist = true;
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const root: HTMLElement = fixture.nativeElement;
+    (root.querySelector('app-shortlist .toolbar') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(root.querySelector('dialog [role=alert]')?.textContent).toContain('įkelti nepavyko');
+    failShortlist = false;
+    const retry = [...root.querySelectorAll<HTMLButtonElement>('dialog button')].find((button) =>
+      button.textContent?.includes('Bandyti dar kartą'),
+    )!;
+    retry.click();
+    await fixture.whenStable();
+    expect(root.querySelectorAll('dialog thead th')).toHaveLength(2);
+    expect(JSON.parse(localStorage.getItem(shortlistKey)!)).toEqual(['offer-1']);
   });
   afterEach(() => {
     vi.unstubAllGlobals();

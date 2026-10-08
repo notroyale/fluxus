@@ -144,6 +144,7 @@ public sealed class CatalogueIntegrationTests(TestCatalogue catalogue) : IClassF
         using var scope = catalogue.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CatalogueDb>();
         var saved = await db.Auctions.AsNoTracking().SingleAsync(a => a.SourceId == "337829");
+        var observations = await db.AuctionObservations.CountAsync(o => o.AuctionId == saved.Id);
         var importer = new ImportCoordinator(new FailingSource(scope.ServiceProvider.GetRequiredService<IAuctionSource>()),
             scope.ServiceProvider.GetRequiredService<IParcelProvider>(), scope.ServiceProvider.GetRequiredService<ICatalogueStore>());
         var summary = await importer.RunAsync("Fixture", 10, 40, CancellationToken.None);
@@ -151,6 +152,8 @@ public sealed class CatalogueIntegrationTests(TestCatalogue catalogue) : IClassF
         var retained = await db.Auctions.AsNoTracking().SingleAsync(a => a.SourceId == saved.SourceId);
         Assert.Equal(saved.Id, retained.Id); Assert.Equal(saved.InitialPriceEur, retained.InitialPriceEur);
         Assert.Equal(saved.ObservedAt, retained.ObservedAt);
+        Assert.Equal(observations, await db.AuctionObservations.CountAsync(o => o.AuctionId == saved.Id));
+        Assert.All(await db.Items.Where(i => i.AuctionId == saved.Id).ToArrayAsync(), i => Assert.True(i.IsPresent));
         Assert.Equal("partial", (await db.ImportRuns.OrderByDescending(r => r.StartedAt).FirstAsync()).Outcome);
         Assert.Contains(await db.ImportIssues.ToListAsync(), issue => issue.SourceId == saved.SourceId);
     }

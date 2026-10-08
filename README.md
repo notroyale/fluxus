@@ -120,7 +120,25 @@ dotnet run --project src/Fluxus.Api --no-launch-profile -- --validate-sources
 
 This command rewrites `tests/fixtures` and its validation report. Review the changes before retaining them. Saved detail fixtures omit owner/contact/payment information and free-form descriptions. The importer does not persist raw source HTML.
 
-Verified locally on 8 October 2026: 80 backend and 27 frontend tests pass, along with the solution/production frontend builds and formatting. Docker and GDAL/PDAL mechanical checks are documented in the landscape validation record. Tests also cover an actual rental auction, sale versus rental classification, full/partial/unknown ownership, matching list and map filters, both price sort orders, missing prices, and URL/reset behavior. Batch checks cover reordered responses, missing parcels, duplicate/conflicting matches, transfer limits, and request-size limits.
+Verified locally on 8 October 2026: 85 backend and 36 frontend tests pass, along with the solution/production frontend builds and formatting. Docker and GDAL/PDAL mechanical checks are documented in the landscape validation record. Tests also cover an actual rental auction, sale versus rental classification, full/partial/unknown ownership, matching list and map filters, both price sort orders, missing prices, and URL/reset behavior. Batch checks cover reordered responses, missing parcels, duplicate/conflicting matches, transfer limits, and request-size limits.
+
+## Change history and saved offers
+
+Use **☆ Išsaugoti** on an offer or its details to save up to four individual offers, including separate ownership shares. **Išsaugoti (n)** in the header opens a comparison of price, sale price per hectare, ownership, offered/total area, exact-boundary availability, landscape summary, deadlines and observation/addition dates. Saved IDs stay in this browser's local storage, synchronize across its tabs and survive reloads. They load independently of current filters; opening a saved offer and reloading its URL still works outside the map results. There are no accounts or cross-device synchronization. Failed reads can be retried, and missing or unreadable saved IDs can be removed. Blocked browser storage keeps the current session usable with an explicit message.
+
+Per-hectare prices use a separate component price when present, otherwise the starting auction price only for a single land offer without other assets. Rentals, contradictory/missing/zero areas, omitted offers and unattributable bundle prices show **Nepalyginama** rather than an invented comparison. The source's component price is displayed separately from the whole-auction price.
+
+Open **Aukciono pakeitimų istorija** in the detail panel for the latest 50 recorded states (with the total and a truncation notice). A new auction records its first accepted state; subsequent successful detail reads record changes to starting price, last bid, status, deadline or offer membership, preserving old/new values. Unchanged reads update freshness without duplicating history. Offer badges show additions and price/status changes within five days. A passed deadline with a still-active saved status is labeled separately from a source-confirmed end. Ended auctions are never assumed sold. Failed, partial or bounded listing discovery never marks unseen auctions sold or removed.
+
+Live imports reserve up to 20 of the default 100 detail attempts for overdue known auctions whose last successful observation is at least an hour old, oldest first. Smaller attempt budgets scale this allowance down. These direct detail rechecks use the same import lock, sequential source delay, failure reporting and overall attempt limit as discovery. A successful terminal-status read ends further overdue rechecks; failed reads preserve the previous record and history. A source-confirmed omission of one land section retains its ID, first-added date and last accepted data for the shortlist while hiding it from current map/list results. Reappearance restores the same ID. Component-price/area histories and disappearance reconciliation against a complete catalogue remain future work.
+
+Existing databases need `AuctionChangeHistory` through the explicit migration command:
+
+```powershell
+docker compose -f deploy/compose.yaml --profile app run --rm api --migrate
+```
+
+The migration seeds existing auctions with **baseline** snapshots using their stored observation dates, without inventing earlier changes. The local database now has 128 baseline snapshots and retains 128 auctions / 143 offers / 142 mapped offers. A pre-migration backup is saved at ignored `.local/fluxus-before-change-history.dump`; no live scrape was triggered during this feature deployment. Browser checks confirmed two real offers compare correctly, history baselines load, saved IDs survive reloads, and the 390 px phone comparison scrolls horizontally inside the table without page overflow. No browser errors were observed. Tests cover history/idempotence, null price transitions, source failures, overdue terminal-status rechecks, omission/reappearance, bounded history/ID reads, safe per-hectare attribution, shortlist capacity/persistence/cross-tab changes, blocked storage, missing offers, read failures/retry, external JSON validation and selecting saved offers outside filters.
 
 ## Structure and API
 
@@ -137,6 +155,8 @@ Verified locally on 8 October 2026: 80 backend and 27 frontend tests pass, along
 | --- | --- |
 | `GET /api/catalog/map` | Cluster-ready point GeoJSON, offer cards including unresolved offers, and freshness/sample metadata |
 | `GET /api/auctions/{id}` | Auction totals, source link, and all land offers |
+| `GET /api/auctions/{id}/history` | Latest 50 recorded auction states, total count and truncation flag |
+| `GET /api/catalog/shortlist?ids={id1},{id2}` | One to four saved offer cards in requested order, including omitted offers, plus missing IDs |
 | `GET /api/auction-parcels/{id}/geometry` | Selected cadastral MultiPolygon or an explicit unresolved state |
 | `GET /api/catalog/filters` | Available municipalities |
 | `GET /api/catalog/status` | Latest import outcome |

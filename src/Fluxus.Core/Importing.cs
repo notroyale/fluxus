@@ -24,6 +24,11 @@ public sealed record ImportSummary(int Auctions, int Items, int Mapped, int Fail
 public sealed record ImportProgress(string Phase, int Auctions, int Items, int Mapped, int FailedAuctions);
 public sealed class ImportAlreadyRunningException() : InvalidOperationException("Another import is already running.");
 
+public interface IAuctionRecheckCandidates
+{
+    Task<IReadOnlyList<ListingItem>> GetRecheckCandidatesAsync(int limit, CancellationToken cancellationToken);
+}
+
 public interface ICatalogueStore
 {
     Task<IAsyncDisposable?> TryAcquireImportLockAsync(CancellationToken cancellationToken);
@@ -35,7 +40,8 @@ public interface ICatalogueStore
     Task CompleteRunAsync(ImportSummary summary, CancellationToken cancellationToken);
 }
 
-public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider provider, ICatalogueStore store)
+public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider provider, ICatalogueStore store,
+    IAuctionRecheckCandidates? rechecks = null)
 {
     public async Task<ImportSummary> RunAsync(string mode, int maxAuctions, int maxPages, CancellationToken ct,
         IProgress<ImportProgress>? progress = null)
@@ -44,18 +50,26 @@ public sealed class ImportCoordinator(IAuctionSource source, IParcelProvider pro
             throw new ImportAlreadyRunningException();
         await store.BeginRunAsync(mode, ct);
         var seen = new HashSet<string>();
+        var listingSeen = new HashSet<string>();
         var resolved = new Dictionary<string, ParcelResolution>();
         var auctions = 0; var items = 0; var mapped = 0; var failed = 0; var complete = false;
         var pageNumber = 0;
         try
         {
+            // Reserve at most one fifth of the existing attempt budget for overdue known auctions.
+            // Their detail pages can confirm a terminal status; listing absence cannot.
+            var candidates = mode == "Live" && rechecks is not null
+                ? await rechecks.GetRecheckCandidatesAsync(Math.Min(20, Math.Max(1, maxAuctions / 5)), ct)
+                : [];
             for (var pages = 0; pages < maxPages; pages++)
             {
                 Report("listing");
                 var page = await source.GetListingAsync(pageNumber, false, ct);
-                var newItems = page.Items.Where(i => seen.Add(i.SourceId)).ToArray();
-                if (newItems.Length == 0 && !page.IsEmpty)
+                var newListingItems = page.Items.Count(i => listingSeen.Add(i.SourceId));
+                if (newListingItems == 0 && !page.IsEmpty)
                     throw new FormatException("Listing pagination repeated without new auction IDs.");
+                var listingsToRead = pages == 0 ? candidates.Concat(page.Items) : page.Items;
+                var newItems = listingsToRead.Where(i => seen.Add(i.SourceId)).ToArray();
                 var prepared = new List<(ListingItem Source, ParsedAuction Auction)>();
                 foreach (var listingItem in newItems.Take(maxAuctions - auctions - failed))
                 {

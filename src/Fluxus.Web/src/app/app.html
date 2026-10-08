@@ -7,7 +7,7 @@
     <span class="live-dot"></span>Lietuva <span class="divider">/</span> Sklypai
   </div>
   <app-catalog-refresh (refreshed)="reloadCatalogue()" />
-  <span class="prototype">Prototipas</span>
+  <app-shortlist [now]="now()" (selected)="select($event.id, $event.auctionId)" />
 </header>
 <main class="workspace">
   <aside class="sidebar" [class.mobile-hidden]="mobileView() === 'map'">
@@ -161,6 +161,9 @@
       </div>
     </form>
     <section class="results" aria-label="Aukcionų sąrašas">
+      @if (shortlist.message(); as message) {
+        <p class="error" role="status">{{ message }}</p>
+      }
       @if (catalog.isLoading()) {
         <div class="empty" role="status">Įkeliami aukcionai…</div>
       } @else if (catalog.error(); as error) {
@@ -198,6 +201,7 @@
               <span class="status-pill">{{ status(group.item.status) }}</span
               ><span class="auction-number">Nr. {{ group.item.number }}</span>
             </div>
+            <app-offer-changes [card]="group.item" [now]="now()" />
             <h2>{{ group.item.municipalityName ?? 'Vieta tikslinama' }}</h2>
             <p class="address">{{ group.item.address ?? 'Adresas nenurodytas' }}</p>
             <div class="card-values">
@@ -239,6 +243,16 @@
               >
             }
           </button>
+          @for (item of group.items; track item.id) {
+            <app-save-offer
+              [card]="item"
+              [label]="
+                group.items.length > 1
+                  ? 'Dalis ' + (item.share ?? 'nenurodyta') + ' · ' + area(item.soldAreaHa)
+                  : ''
+              "
+            />
+          }
         } @empty {
           <div class="empty">
             <strong>Sklypų nerasta</strong>
@@ -300,15 +314,25 @@
     @if (selectedId()) {
       <section class="detail-panel" #detailPanel tabindex="-1" aria-label="Pasirinktas aukcionas">
         <button class="close" (click)="closeDetails()" aria-label="Uždaryti aukcioną">×</button>
-        @if (detail.isLoading()) {
+        @if (detail.isLoading() || (selectedOffer.isLoading() && !detail.hasValue())) {
           <p role="status">Įkeliama aukciono informacija…</p>
         } @else if (detail.error(); as error) {
           <p class="error" role="alert">{{ errorMessage(error) }}</p>
           <button (click)="detail.reload()">Bandyti dar kartą</button>
+        } @else if (selectedOffer.error() && !detail.hasValue()) {
+          <p class="error" role="alert">{{ errorMessage(selectedOffer.error()) }}</p>
+          <button (click)="selectedOffer.reload()">Bandyti dar kartą</button>
         } @else if (detail.hasValue()) {
           <p class="eyebrow">AUKCIONAS NR. {{ detail.value().number }}</p>
           <h2>{{ selectedCard()?.municipalityName ?? 'Žemės sklypas' }}</h2>
           <p class="detail-address">{{ selectedCard()?.address }}</p>
+          @if (selectedCard(); as card) {
+            <app-save-offer [card]="card" />
+            <app-offer-changes [card]="card" [now]="now()" />
+            @if (shortlist.message(); as message) {
+              <p class="error" role="status">{{ message }}</p>
+            }
+          }
           <p class="offer-description">
             {{ offerType(selectedCard()?.offerType ?? 'unknown') }} ·
             {{ ownership(selectedCard()?.ownershipKind ?? 'unknown') }}
@@ -388,6 +412,15 @@
             {{ resolution(selectedCard()?.resolutionStatus ?? '') }}. Rodoma viso kadastro sklypo
             riba; nuosavybės dalis neturi atskiros pažymėtos teritorijos.
           </p>
+          <app-auction-history
+            [auctionId]="detail.value().id"
+            [observedAt]="detail.value().observedAt"
+          />
+          @if (selectedCard(); as card) {
+            <p class="detail-observed">
+              Pridėta į katalogą: {{ card.firstSeenAt ? date(card.firstSeenAt) : 'data nežinoma' }}.
+            </p>
+          }
           @if (landscape.isLoading()) {
             <p role="status">Įkeliamas kraštovaizdžio vertinimas…</p>
           } @else if (landscape.error()) {
@@ -426,7 +459,7 @@
             Stebėta {{ date(detail.value().observedAt) }} · Vilniaus laiku
           </p>
         } @else {
-          <p>Pasirinktas sklypas nepriklauso dabartiniams rezultatams.</p>
+          <p>Pasirinkto sklypo kataloge nerasta.</p>
         }
       </section>
     }

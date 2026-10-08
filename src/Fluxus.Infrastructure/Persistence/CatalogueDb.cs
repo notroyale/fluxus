@@ -18,6 +18,11 @@ public sealed class AuctionEntity
     public bool ContainsNonLandAssets { get; set; }
     public DateTimeOffset ObservedAt { get; set; }
     public string Mode { get; set; } = "Fixture";
+    public int OfferCount { get; set; }
+    public DateTimeOffset? PriceChangedAt { get; set; }
+    public decimal? PreviousInitialPriceEur { get; set; }
+    public DateTimeOffset? StatusChangedAt { get; set; }
+    public string? PreviousStatus { get; set; }
     public List<AuctionItemEntity> Items { get; set; } = [];
 }
 
@@ -28,6 +33,8 @@ public sealed class AuctionItemEntity
     public AuctionEntity Auction { get; set; } = null!;
     public string SourceKey { get; set; } = "";
     public DateTimeOffset? FirstSeenAt { get; set; }
+    public bool IsPresent { get; set; } = true;
+    public DateTimeOffset? MissingSince { get; set; }
     public Guid? ParcelId { get; set; }
     public ParcelEntity? Parcel { get; set; }
     public string? UniqueNumber { get; set; }
@@ -82,6 +89,29 @@ public sealed class ImportRunEntity
     public List<ImportIssueEntity> Issues { get; set; } = [];
 }
 
+public sealed class AuctionObservationEntity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AuctionId { get; set; }
+    public DateTimeOffset ObservedAt { get; set; }
+    public string Mode { get; set; } = "Fixture";
+    public string Kind { get; set; } = "baseline";
+    public string Status { get; set; } = "unknown";
+    public string? PreviousStatus { get; set; }
+    public decimal? InitialPriceEur { get; set; }
+    public decimal? PreviousInitialPriceEur { get; set; }
+    public decimal? LastBidEur { get; set; }
+    public decimal? PreviousLastBidEur { get; set; }
+    public DateTimeOffset? EndsAt { get; set; }
+    public DateTimeOffset? PreviousEndsAt { get; set; }
+    public int OfferCount { get; set; }
+    public bool PriceChanged { get; set; }
+    public bool BidChanged { get; set; }
+    public bool StatusChanged { get; set; }
+    public bool DeadlineChanged { get; set; }
+    public bool OffersChanged { get; set; }
+}
+
 public sealed class ImportIssueEntity
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -97,6 +127,7 @@ public sealed class CatalogueDb(DbContextOptions<CatalogueDb> options) : DbConte
     public DbSet<ParcelEntity> Parcels => Set<ParcelEntity>();
     public DbSet<ImportRunEntity> ImportRuns => Set<ImportRunEntity>();
     public DbSet<ImportIssueEntity> ImportIssues => Set<ImportIssueEntity>();
+    public DbSet<AuctionObservationEntity> AuctionObservations => Set<AuctionObservationEntity>();
     public DbSet<LandscapeDatasetEntity> LandscapeDatasets => Set<LandscapeDatasetEntity>();
     public DbSet<LandscapeJobEntity> LandscapeJobs => Set<LandscapeJobEntity>();
     public DbSet<LandscapeAnalysisEntity> LandscapeAnalyses => Set<LandscapeAnalysisEntity>();
@@ -111,6 +142,7 @@ public sealed class CatalogueDb(DbContextOptions<CatalogueDb> options) : DbConte
             entity.HasIndex(a => new { a.Status, a.EndsAt });
             entity.Property(a => a.InitialPriceEur).HasPrecision(18, 2);
             entity.Property(a => a.LastBidEur).HasPrecision(18, 2);
+            entity.Property(a => a.PreviousInitialPriceEur).HasPrecision(18, 2);
             entity.HasMany(a => a.Items).WithOne(i => i.Auction).HasForeignKey(i => i.AuctionId);
         });
         model.Entity<AuctionItemEntity>(entity =>
@@ -120,6 +152,7 @@ public sealed class CatalogueDb(DbContextOptions<CatalogueDb> options) : DbConte
             entity.Property(i => i.TotalAreaHa).HasPrecision(18, 8);
             entity.Property(i => i.SoldAreaHa).HasPrecision(18, 8);
             entity.Property(i => i.ComponentPriceEur).HasPrecision(18, 2);
+            entity.Property(i => i.IsPresent).HasDefaultValue(true);
             entity.Property(i => i.Issues).HasColumnType("jsonb");
             entity.HasOne(i => i.Parcel).WithMany().HasForeignKey(i => i.ParcelId);
         });
@@ -140,6 +173,16 @@ public sealed class CatalogueDb(DbContextOptions<CatalogueDb> options) : DbConte
             entity.HasMany(r => r.Issues).WithOne().HasForeignKey(i => i.RunId);
         });
         model.Entity<ImportIssueEntity>().ToTable("import_issues");
+        model.Entity<AuctionObservationEntity>(entity =>
+        {
+            entity.ToTable("auction_observations");
+            entity.HasIndex(o => new { o.AuctionId, o.ObservedAt });
+            entity.HasOne<AuctionEntity>().WithMany().HasForeignKey(o => o.AuctionId);
+            entity.Property(o => o.InitialPriceEur).HasPrecision(18, 2);
+            entity.Property(o => o.PreviousInitialPriceEur).HasPrecision(18, 2);
+            entity.Property(o => o.LastBidEur).HasPrecision(18, 2);
+            entity.Property(o => o.PreviousLastBidEur).HasPrecision(18, 2);
+        });
         model.Entity<LandscapeDatasetEntity>(entity =>
         {
             entity.ToTable("landscape_datasets");

@@ -7,9 +7,24 @@ using Npgsql;
 
 namespace Fluxus.Infrastructure.Persistence;
 
-public sealed class PostgresCatalogueStore(CatalogueDb db, SourceOptions options, TimeProvider clock, NpgsqlDataSource dataSource) : ICatalogueStore
+public sealed class PostgresCatalogueStore(CatalogueDb db, SourceOptions options, TimeProvider clock, NpgsqlDataSource dataSource) : ICatalogueStore, IAuctionRecheckCandidates
 {
     private ImportRunEntity? run;
+
+    public async Task<IReadOnlyList<ListingItem>> GetRecheckCandidatesAsync(int limit, CancellationToken ct)
+    {
+        if (options.Mode != "Live" || limit < 1) return [];
+        var now = clock.GetUtcNow();
+        var retryBefore = now.AddHours(-1);
+        var candidates = await db.Auctions.AsNoTracking()
+            .Where(a => a.Mode == "Live" && (a.Status == "announced" || a.Status == "running") &&
+                a.EndsAt <= now && a.ObservedAt <= retryBefore)
+            .OrderBy(a => a.ObservedAt).ThenBy(a => a.Id).Take(Math.Min(limit, 20))
+            .Select(a => new { a.SourceId, a.Number, a.SourceUrl }).ToArrayAsync(ct);
+        return candidates.Where(a => Uri.TryCreate(a.SourceUrl, UriKind.Absolute, out var uri) &&
+            uri.Scheme == "https" && uri.Host == "www.evarzytynes.lt" && uri.AbsolutePath == "/evs/pages/auction.do")
+            .Select(a => new ListingItem(a.SourceId, a.Number, new Uri(a.SourceUrl), "")).ToArray();
+    }
 
     public async Task<IAsyncDisposable?> TryAcquireImportLockAsync(CancellationToken ct)
     {
@@ -79,12 +94,43 @@ public sealed class PostgresCatalogueStore(CatalogueDb db, SourceOptions options
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var auction = await db.Auctions.Include(a => a.Items).SingleOrDefaultAsync(a => a.SourceId == input.SourceId, ct);
+        var isNew = auction is null;
         if (auction is null) { auction = new() { SourceId = input.SourceId }; db.Auctions.Add(auction); }
+        var observedAt = options.Mode == "Fixture" ? options.FixtureObservedAt ?? clock.GetUtcNow() : clock.GetUtcNow();
+        var keys = input.Items.Select(i => i.SourceKey).ToHashSet();
+        var observation = new AuctionObservationEntity
+        {
+            AuctionId = auction.Id, ObservedAt = observedAt, Mode = options.Mode,
+            Kind = isNew ? "added" : "changed",
+            Status = input.Status, PreviousStatus = isNew ? null : auction.Status,
+            InitialPriceEur = input.InitialPriceEur, PreviousInitialPriceEur = isNew ? null : auction.InitialPriceEur,
+            LastBidEur = input.LastBidEur, PreviousLastBidEur = isNew ? null : auction.LastBidEur,
+            EndsAt = input.EndsAt, PreviousEndsAt = isNew ? null : auction.EndsAt, OfferCount = input.Items.Count,
+            PriceChanged = !isNew && auction.InitialPriceEur != input.InitialPriceEur,
+            BidChanged = !isNew && auction.LastBidEur != input.LastBidEur,
+            StatusChanged = !isNew && auction.Status != input.Status,
+            DeadlineChanged = !isNew && auction.EndsAt != input.EndsAt,
+            OffersChanged = !isNew && !keys.SetEquals(auction.Items.Where(i => i.IsPresent).Select(i => i.SourceKey))
+        };
+        if (isNew || observation.PriceChanged || observation.BidChanged || observation.StatusChanged ||
+            observation.DeadlineChanged || observation.OffersChanged)
+            db.AuctionObservations.Add(observation);
+        if (observation.PriceChanged)
+        {
+            auction.PriceChangedAt = observedAt;
+            auction.PreviousInitialPriceEur = auction.InitialPriceEur;
+        }
+        if (observation.StatusChanged)
+        {
+            auction.StatusChangedAt = observedAt;
+            auction.PreviousStatus = auction.Status;
+        }
+        auction.OfferCount = input.Items.Count;
         auction.Number = input.Number; auction.SourceUrl = input.SourceUrl; auction.Status = input.Status;
         auction.StartsAt = input.StartsAt; auction.EndsAt = input.EndsAt;
         auction.InitialPriceEur = input.InitialPriceEur; auction.LastBidEur = input.LastBidEur;
         auction.ContainsNonLandAssets = input.ContainsNonLandAssets;
-        auction.ObservedAt = options.Mode == "Fixture" ? options.FixtureObservedAt ?? clock.GetUtcNow() : clock.GetUtcNow();
+        auction.ObservedAt = observedAt;
         auction.Mode = options.Mode;
         foreach (var land in input.Items)
         {
@@ -96,6 +142,7 @@ public sealed class PostgresCatalogueStore(CatalogueDb db, SourceOptions options
                 auction.Items.Add(item);
             }
             item.UniqueNumber = land.UniqueNumber; item.CadastralNumber = land.CadastralNumber; item.Address = land.Address;
+            item.IsPresent = true; item.MissingSince = null;
             item.TotalAreaHa = land.TotalAreaHa; item.SoldAreaHa = land.SoldAreaHa; item.SoldAreaBasis = land.SoldAreaBasis;
             item.Share = land.ShareRaw; item.LandUse = land.LandUse; item.ComponentPriceEur = land.ComponentPriceEur;
             item.OfferType = land.OfferType; item.OwnershipKind = land.OwnershipKind;
@@ -123,8 +170,13 @@ public sealed class PostgresCatalogueStore(CatalogueDb db, SourceOptions options
                 item.Parcel = parcel;
             }
         }
-        var keys = input.Items.Select(i => i.SourceKey).ToHashSet();
-        db.Items.RemoveRange(auction.Items.Where(i => !keys.Contains(i.SourceKey)).ToArray());
+        // A confirmed detail omission retains the saved offer and its identity for the shortlist.
+        // Absence from a bounded listing scrape never infers an auction outcome.
+        foreach (var missing in auction.Items.Where(i => i.IsPresent && !keys.Contains(i.SourceKey)))
+        {
+            missing.IsPresent = false;
+            missing.MissingSince = observedAt;
+        }
         await db.SaveChangesAsync(ct);
         // PostGIS computes the point on surface using the accepted polygon, including holes.
         await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE parcels SET \"MarkerPoint\" = ST_PointOnSurface(\"Geometry\") WHERE \"Geometry\" IS NOT NULL AND \"Id\" IN (SELECT \"ParcelId\" FROM auction_items WHERE \"AuctionId\" = {auction.Id})", ct);

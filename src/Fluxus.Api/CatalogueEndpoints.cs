@@ -55,7 +55,10 @@ public sealed record ItemCard(Guid Id, Guid AuctionId, string Number, string Sta
     string? MunicipalityCode, string? MunicipalityName, decimal? InitialPriceEur, decimal? LastBidEur,
     DateTimeOffset? EndsAt, decimal? TotalAreaHa, decimal? SoldAreaHa, string SoldAreaBasis,
     string? Share, bool ContainsNonLandAssets, string ResolutionStatus, string OfferType, string OwnershipKind,
-    LandscapeSummary Landscape, DateTimeOffset? FirstSeenAt);
+    LandscapeSummary Landscape, DateTimeOffset? FirstSeenAt, DateTimeOffset ObservedAt,
+    bool IsPresent, DateTimeOffset? MissingSince, DateTimeOffset? PriceChangedAt,
+    decimal? PreviousInitialPriceEur, DateTimeOffset? StatusChangedAt, string? PreviousStatus,
+    decimal? PricePerHaEur, decimal? ComponentPriceEur, int AuctionOfferCount);
 
 public static class CatalogueEndpoints
 {
@@ -68,7 +71,7 @@ public static class CatalogueEndpoints
             var statuses = filters.Statuses();
             var query = db.Items.AsNoTracking().Include(i => i.Auction).Include(i => i.Parcel!)
                 .ThenInclude(p => p.CurrentLandscapeAnalysis!).ThenInclude(a => a.Dataset)
-                .Where(i => statuses.Contains(i.Auction.Status));
+                .Where(i => i.IsPresent && statuses.Contains(i.Auction.Status));
             if (filters.MunicipalityCode is { } municipality) query = query.Where(i => i.Parcel != null && i.Parcel.MunicipalityCode == municipality);
             if (filters.MinPriceEur is { } minPrice) query = query.Where(i => i.Auction.InitialPriceEur >= minPrice);
             if (filters.MaxPriceEur is { } maxPrice) query = query.Where(i => i.Auction.InitialPriceEur <= maxPrice);
@@ -192,9 +195,20 @@ public static class CatalogueEndpoints
             }).FirstOrDefaultAsync(ct)));
     }
 
-    private static ItemCard Card(AuctionItemEntity item) => new(item.Id, item.AuctionId, item.Auction.Number,
+    internal static ItemCard Card(AuctionItemEntity item) => new(item.Id, item.AuctionId, item.Auction.Number,
         item.Auction.Status, item.Address, item.Parcel?.MunicipalityCode, item.Parcel?.MunicipalityName,
         item.Auction.InitialPriceEur, item.Auction.LastBidEur, item.Auction.EndsAt, item.TotalAreaHa, item.SoldAreaHa,
         item.SoldAreaBasis, item.Share, item.Auction.ContainsNonLandAssets, item.ResolutionStatus, item.OfferType, item.OwnershipKind,
-        LandscapeEndpoints.Summary(item), item.FirstSeenAt);
+        LandscapeEndpoints.Summary(item), item.FirstSeenAt, item.Auction.ObservedAt,
+        item.IsPresent, item.MissingSince, item.Auction.PriceChangedAt, item.Auction.PreviousInitialPriceEur,
+        item.Auction.StatusChangedAt, item.Auction.PreviousStatus, PricePerHa(item), item.ComponentPriceEur, item.Auction.OfferCount);
+
+    private static decimal? PricePerHa(AuctionItemEntity item)
+    {
+        if (!item.IsPresent || item.OfferType != "sale" || item.SoldAreaHa is not > 0 || item.SoldAreaBasis == "conflict") return null;
+        // Never attribute the entire bundle price to an individual land share.
+        var price = item.ComponentPriceEur ?? (item.Auction.OfferCount == 1 && !item.Auction.ContainsNonLandAssets
+            ? item.Auction.InitialPriceEur : null);
+        return price is >= 0 ? decimal.Round(price.Value / item.SoldAreaHa.Value, 2) : null;
+    }
 }

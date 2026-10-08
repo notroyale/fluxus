@@ -40,7 +40,9 @@ builder.Services.AddHttpClient<IAuctionSource, EvarzytynesSource>(http =>
     http.Timeout = TimeSpan.FromSeconds(40); http.DefaultRequestHeaders.UserAgent.ParseAdd("FluxusPrototype/0.1");
 });
 builder.Services.AddHttpClient<IParcelProvider, GeoportalProvider>(http => http.Timeout = TimeSpan.FromSeconds(60));
-builder.Services.AddScoped<ICatalogueStore, PostgresCatalogueStore>();
+builder.Services.AddScoped<PostgresCatalogueStore>();
+builder.Services.AddScoped<ICatalogueStore>(services => services.GetRequiredService<PostgresCatalogueStore>());
+builder.Services.AddScoped<IAuctionRecheckCandidates>(services => services.GetRequiredService<PostgresCatalogueStore>());
 builder.Services.AddScoped<ImportCoordinator>();
 builder.Services.AddSingleton<CatalogueRefresh>();
 builder.Services.AddHostedService<CatalogueRefreshWorker>();
@@ -65,6 +67,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/health/ready", async (CatalogueDb db, CancellationToken ct) =>
     await db.Database.CanConnectAsync(ct) ? Results.Ok(new { status = "ok" }) : Results.StatusCode(503));
 app.MapCatalogue();
+app.MapCatalogueTracking();
 app.MapCatalogueRefresh();
 app.MapLandscape();
 app.UseDefaultFiles();

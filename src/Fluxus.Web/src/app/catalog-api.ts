@@ -28,6 +28,16 @@ export interface ItemCard {
   ownershipKind: 'full' | 'partial' | 'unknown' | 'not_applicable';
   landscape: LandscapeSummary;
   firstSeenAt: string | null;
+  observedAt: string;
+  isPresent: boolean;
+  missingSince: string | null;
+  priceChangedAt: string | null;
+  previousInitialPriceEur: number | null;
+  statusChangedAt: string | null;
+  previousStatus: string | null;
+  pricePerHaEur: number | null;
+  componentPriceEur: number | null;
+  auctionOfferCount: number;
 }
 export interface Catalog extends FeatureCollection<Point, ItemCard> {
   items: ItemCard[];
@@ -107,8 +117,23 @@ function nullableString(value: unknown): value is string | null {
 function nullableNumber(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value));
 }
-function item(value: unknown): ItemCard {
+export function parseItemCard(value: unknown): ItemCard {
   const row = object(value);
+  for (const key of ['missingSince', 'priceChangedAt', 'statusChangedAt'])
+    if (
+      row[key] !== null &&
+      (typeof row[key] !== 'string' || !Number.isFinite(Date.parse(row[key])))
+    )
+      throw new Error('Netinkama pakeitimo data.');
+  if (
+    typeof row['observedAt'] !== 'string' ||
+    !Number.isFinite(Date.parse(row['observedAt'])) ||
+    typeof row['isPresent'] !== 'boolean' ||
+    !nullableString(row['previousStatus']) ||
+    !Number.isInteger(row['auctionOfferCount']) ||
+    Number(row['auctionOfferCount']) < 0
+  )
+    throw new Error('Netinkama pasiūlymo istorija.');
   if (
     row['firstSeenAt'] !== null &&
     (typeof row['firstSeenAt'] !== 'string' || !Number.isFinite(Date.parse(row['firstSeenAt'])))
@@ -124,7 +149,15 @@ function item(value: unknown): ItemCard {
     if (typeof row[key] !== 'string') throw new Error('Netinkami aukciono duomenys.');
   for (const key of ['address', 'municipalityCode', 'municipalityName', 'endsAt', 'share'])
     if (!nullableString(row[key])) throw new Error('Netinkami sklypo duomenys.');
-  for (const key of ['initialPriceEur', 'lastBidEur', 'totalAreaHa', 'soldAreaHa'])
+  for (const key of [
+    'initialPriceEur',
+    'lastBidEur',
+    'totalAreaHa',
+    'soldAreaHa',
+    'previousInitialPriceEur',
+    'pricePerHaEur',
+    'componentPriceEur',
+  ])
     if (!nullableNumber(row[key])) throw new Error('Netinkami sklypo dydžiai.');
   if (typeof row['containsNonLandAssets'] !== 'boolean')
     throw new Error('Netinkami turto duomenys.');
@@ -138,7 +171,7 @@ export function parseCatalog(value: unknown): Catalog {
     !Array.isArray(catalog['items'])
   )
     throw new Error('Netinkamas žemėlapio atsakymas.');
-  catalog['items'].forEach(item);
+  catalog['items'].forEach(parseItemCard);
   for (const raw of catalog['features']) {
     const feature = object(raw);
     const geometry = object(feature['geometry']);
@@ -151,7 +184,7 @@ export function parseCatalog(value: unknown): Catalog {
       !geometry['coordinates'].every((n) => typeof n === 'number' && Number.isFinite(n))
     )
       throw new Error('Netinkamos koordinatės.');
-    item(feature['properties']);
+    parseItemCard(feature['properties']);
   }
   const meta = object(catalog['meta']);
   for (const key of ['auctions', 'items', 'mapped', 'unresolved'])
@@ -225,7 +258,7 @@ export class CatalogApi {
       throw new Error('Netinkama aukciono nuoroda.');
     for (const raw of row['items']) {
       const section = object(raw);
-      item(section['card']);
+      parseItemCard(section['card']);
       for (const key of ['uniqueNumber', 'cadastralNumber', 'landUse'])
         if (!nullableString(section[key])) throw new Error('Netinkami sklypo identifikatoriai.');
       if (!nullableNumber(section['componentPriceEur'])) throw new Error('Netinkama sklypo kaina.');
